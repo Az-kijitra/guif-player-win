@@ -128,6 +128,10 @@
       {/each}
     </div>
 
+    {#if playerState.isLoadingFolder || playerState.isLoadingAlbums}
+      <span class="loading" role="status">読み込み中…</span>
+    {/if}
+
     <button
       class="nav-btn refresh"
       onclick={() => {
@@ -143,6 +147,12 @@
 </header>
 
 <style>
+  .loading {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--nord4);
+  }
+
   .path-header {
     background-color: var(--nord1);
     border-bottom: 1px solid var(--nord3);

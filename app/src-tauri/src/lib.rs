@@ -9,7 +9,7 @@ mod test_audio;
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager, State};
 
 use crate::db::Database;
@@ -20,6 +20,8 @@ use crate::models::{
 use crate::player::{AudioPlayer, SharedPlayer};
 use crate::queue::REPEAT_ONE;
 
+const RESUME_SAVE_INTERVAL: Duration = Duration::from_secs(3);
+
 pub struct AppState {
     pub player: SharedPlayer,
     pub db: Arc<Database>,
@@ -29,15 +31,43 @@ pub struct AppState {
 // Folder & Albums Commands
 // ----------------------------------------------------
 
+// Commands without `async` run on the main thread, where anything slow freezes the window. File
+// access, tag reading and everything that waits for the player lock therefore run on the blocking pool.
+async fn run_blocking<T, F>(work: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+async fn with_player<T, F>(state: State<'_, AppState>, work: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&mut AudioPlayer, &Database) -> T + Send + 'static,
+{
+    let (player, db) = (Arc::clone(&state.player), Arc::clone(&state.db));
+    run_blocking(move || {
+        let mut player = player.lock().unwrap();
+        work(&mut player, &db)
+    })
+    .await
+}
+
 #[tauri::command]
-fn get_default_path(state: State<'_, AppState>) -> String {
-    if let Ok(Some(resume)) = state.db.get_latest_album_resume() {
-        let p = Path::new(&resume.album_path);
-        if p.is_dir() {
-            return resume.album_path;
+async fn get_default_path(state: State<'_, AppState>) -> Result<String, String> {
+    let db = Arc::clone(&state.db);
+    run_blocking(move || {
+        if let Ok(Some(resume)) = db.get_latest_album_resume() {
+            if Path::new(&resume.album_path).is_dir() {
+                return resume.album_path;
+            }
         }
-    }
-    scanner::get_default_music_dir()
+        scanner::get_default_music_dir()
+    })
+    .await
 }
 
 #[tauri::command]
@@ -46,13 +76,13 @@ fn list_drives() -> Vec<String> {
 }
 
 #[tauri::command]
-fn list_folder(path: String) -> FolderContent {
-    scanner::list_folder(&path)
+async fn list_folder(path: String) -> Result<FolderContent, String> {
+    run_blocking(move || scanner::list_folder(&path)).await?
 }
 
 #[tauri::command]
-fn list_albums(root_path: String) -> Vec<AlbumSummary> {
-    scanner::list_albums(&root_path)
+async fn list_albums(root_path: String) -> Result<Vec<AlbumSummary>, String> {
+    run_blocking(move || scanner::list_albums(&root_path)).await
 }
 
 // ----------------------------------------------------
@@ -60,45 +90,45 @@ fn list_albums(root_path: String) -> Vec<AlbumSummary> {
 // ----------------------------------------------------
 
 #[tauri::command]
-fn get_artwork(file_path: String) -> Option<String> {
-    metadata::extract_artwork(Path::new(&file_path))
+async fn get_artwork(file_path: String) -> Result<Option<String>, String> {
+    run_blocking(move || metadata::extract_artwork(Path::new(&file_path))).await
 }
 
 #[tauri::command]
-fn update_tracks_metadata(
+async fn update_tracks_metadata(
     state: State<'_, AppState>,
     request: TagUpdateRequest,
 ) -> Result<TagUpdateResult, String> {
-    // 1. Temporarily release file handle if the currently playing track is being modified
-    let suspended = {
-        let mut player = state.player.lock().unwrap();
-        player.suspend_if_playing(&request.file_paths)
-    };
+    let (player, db) = (Arc::clone(&state.player), Arc::clone(&state.db));
+    run_blocking(move || {
+        // 1. Temporarily release file handle if the currently playing track is being modified
+        let suspended = player.lock().unwrap().suspend_if_playing(&request.file_paths);
 
-    // 2. Perform tag writing on disk
-    let result = metadata::update_tags(&request);
+        // 2. Perform tag writing on disk
+        let result = metadata::update_tags(&request);
 
-    // 3. Restore playback & update in-memory queue and SQLite playlists
-    match result {
-        Ok(outcome) => {
-            {
-                let mut player = state.player.lock().unwrap();
-                player.restore_after_tag_update(&outcome.updated, suspended);
+        // 3. Restore playback & update in-memory queue and SQLite playlists
+        match result {
+            Ok(outcome) => {
+                player
+                    .lock()
+                    .unwrap()
+                    .restore_after_tag_update(&outcome.updated, suspended);
+                for track in &outcome.updated {
+                    let _ = db.update_playlist_track_metadata(track);
+                }
+                Ok(outcome)
             }
-            for track in &outcome.updated {
-                let _ = state.db.update_playlist_track_metadata(track);
+            Err(err) => {
+                // Even on failure, restore playback if it was suspended
+                if let Some(s) = suspended {
+                    player.lock().unwrap().restore_after_tag_update(&[], Some(s));
+                }
+                Err(err)
             }
-            Ok(outcome)
         }
-        Err(err) => {
-            // Even on failure, restore playback if it was suspended
-            if let Some(s) = suspended {
-                let mut player = state.player.lock().unwrap();
-                player.restore_after_tag_update(&[], Some(s));
-            }
-            Err(err)
-        }
-    }
+    })
+    .await?
 }
 
 // ----------------------------------------------------
@@ -116,98 +146,118 @@ fn record_current_track_resume(player: &AudioPlayer, db: &Database) {
 }
 
 #[tauri::command]
-fn play_track(
+async fn play_track(
     state: State<'_, AppState>,
     track: AudioTrack,
     initial_pos_ms: Option<u64>,
 ) -> Result<(), String> {
-    let mut player = state.player.lock().unwrap();
-    player.play_track(track, initial_pos_ms.unwrap_or(0))?;
-    record_current_track_resume(&player, &state.db);
-    Ok(())
+    with_player(state, move |player, db| {
+        player.play_track(track, initial_pos_ms.unwrap_or(0))?;
+        record_current_track_resume(player, db);
+        Ok(())
+    })
+    .await?
 }
 
 #[tauri::command]
-fn play_queue(
+async fn play_queue(
     state: State<'_, AppState>,
     queue: Vec<AudioTrack>,
     start_index: usize,
     initial_pos_ms: Option<u64>,
 ) -> Result<(), String> {
-    let mut player = state.player.lock().unwrap();
-    player.set_queue(queue, start_index, initial_pos_ms.unwrap_or(0))?;
-    record_current_track_resume(&player, &state.db);
-    Ok(())
+    with_player(state, move |player, db| {
+        player.set_queue(queue, start_index, initial_pos_ms.unwrap_or(0))?;
+        record_current_track_resume(player, db);
+        Ok(())
+    })
+    .await?
 }
 
 #[tauri::command]
-fn toggle_play_pause(state: State<'_, AppState>) -> Result<(), String> {
-    let mut player = state.player.lock().unwrap();
-    player.toggle_play_pause()?;
-    record_current_track_resume(&player, &state.db);
-    Ok(())
+async fn toggle_play_pause(state: State<'_, AppState>) -> Result<(), String> {
+    with_player(state, |player, db| {
+        player.toggle_play_pause()?;
+        record_current_track_resume(player, db);
+        Ok(())
+    })
+    .await?
 }
 
 #[tauri::command]
-fn pause(state: State<'_, AppState>) {
-    let mut player = state.player.lock().unwrap();
-    player.pause();
-    record_current_track_resume(&player, &state.db);
+async fn pause(state: State<'_, AppState>) -> Result<(), String> {
+    with_player(state, |player, db| {
+        player.pause();
+        record_current_track_resume(player, db);
+    })
+    .await
 }
 
 #[tauri::command]
-fn resume(state: State<'_, AppState>) {
-    let mut player = state.player.lock().unwrap();
-    player.resume();
+async fn resume(state: State<'_, AppState>) -> Result<(), String> {
+    with_player(state, |player, _| player.resume()).await
 }
 
 #[tauri::command]
-fn seek(state: State<'_, AppState>, position_ms: u64) {
-    let mut player = state.player.lock().unwrap();
-    player.seek(position_ms);
-    record_current_track_resume(&player, &state.db);
+async fn seek(state: State<'_, AppState>, position_ms: u64) -> Result<(), String> {
+    with_player(state, move |player, db| {
+        player.seek(position_ms);
+        record_current_track_resume(player, db);
+    })
+    .await
 }
 
 #[tauri::command]
-fn set_volume(state: State<'_, AppState>, volume: f32) {
-    let mut player = state.player.lock().unwrap();
-    player.set_volume(volume);
+async fn set_volume(state: State<'_, AppState>, volume: f32) -> Result<(), String> {
+    with_player(state, move |player, _| player.set_volume(volume)).await
 }
 
 #[tauri::command]
-fn play_next(state: State<'_, AppState>) -> Result<(), String> {
-    let mut player = state.player.lock().unwrap();
-    player.play_next()?;
-    record_current_track_resume(&player, &state.db);
-    Ok(())
+async fn play_next(state: State<'_, AppState>) -> Result<(), String> {
+    with_player(state, |player, db| {
+        player.play_next()?;
+        record_current_track_resume(player, db);
+        Ok(())
+    })
+    .await?
 }
 
 #[tauri::command]
-fn play_previous(state: State<'_, AppState>) -> Result<(), String> {
-    let mut player = state.player.lock().unwrap();
-    player.play_previous()?;
-    record_current_track_resume(&player, &state.db);
-    Ok(())
+async fn play_previous(state: State<'_, AppState>) -> Result<(), String> {
+    with_player(state, |player, db| {
+        player.play_previous()?;
+        record_current_track_resume(player, db);
+        Ok(())
+    })
+    .await?
 }
 
 #[tauri::command]
-fn toggle_shuffle(state: State<'_, AppState>) -> bool {
-    let mut player = state.player.lock().unwrap();
-    player.toggle_shuffle();
-    player.get_state_dto().shuffle_mode
+async fn toggle_shuffle(state: State<'_, AppState>) -> Result<bool, String> {
+    with_player(state, |player, _| {
+        player.toggle_shuffle();
+        player.get_state_dto().shuffle_mode
+    })
+    .await
 }
 
 #[tauri::command]
-fn toggle_repeat(state: State<'_, AppState>) -> u8 {
-    let mut player = state.player.lock().unwrap();
-    player.toggle_repeat();
-    player.get_state_dto().repeat_mode
+async fn toggle_repeat(state: State<'_, AppState>) -> Result<u8, String> {
+    with_player(state, |player, _| {
+        player.toggle_repeat();
+        player.get_state_dto().repeat_mode
+    })
+    .await
 }
 
 #[tauri::command]
-fn get_playback_state(state: State<'_, AppState>) -> PlaybackStateDto {
-    let player = state.player.lock().unwrap();
-    player.get_state_dto()
+async fn get_playback_state(state: State<'_, AppState>) -> Result<PlaybackStateDto, String> {
+    with_player(state, |player, _| player.get_state_dto()).await
+}
+
+#[tauri::command]
+async fn get_queue(state: State<'_, AppState>) -> Result<Vec<AudioTrack>, String> {
+    with_player(state, |player, _| player.queue_tracks()).await
 }
 
 // ----------------------------------------------------
@@ -500,7 +550,9 @@ pub fn run() {
             let thread_db = Arc::clone(&db_clone);
 
             // Auto-advance & Periodic Save Background Loop
-            std::thread::spawn(move || loop {
+            std::thread::spawn(move || {
+                let mut last_resume_save = Instant::now();
+                loop {
                 std::thread::sleep(Duration::from_millis(400));
 
                 let mut p = thread_player.lock().unwrap();
@@ -526,10 +578,8 @@ pub fn run() {
                         let _ = app_handle.emit("playback-error", e);
                     }
                     record_current_track_resume(&p, &thread_db);
-                    let new_state = p.get_state_dto();
-                    let _ = app_handle.emit("playback-state-changed", new_state);
-                } else if state_dto.is_playing {
-                    // Periodic resume position save every 3 seconds
+                } else if state_dto.is_playing && last_resume_save.elapsed() >= RESUME_SAVE_INTERVAL {
+                    last_resume_save = Instant::now();
                     if state_dto.position_ms > 1000 {
                         if let Some(cur) = &state_dto.current_track {
                             if let Some(parent) = Path::new(&cur.file_path).parent() {
@@ -551,6 +601,7 @@ pub fn run() {
                             }
                         }
                     }
+                }
                 }
             });
 
@@ -579,6 +630,7 @@ pub fn run() {
             toggle_shuffle,
             toggle_repeat,
             get_playback_state,
+            get_queue,
             save_album_resume,
             get_album_resume,
             get_latest_album_resume,

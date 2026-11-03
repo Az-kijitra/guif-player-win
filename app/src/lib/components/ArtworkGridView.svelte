@@ -71,7 +71,9 @@
 </script>
 
 <div class="artwork-grid-view">
-  {#if albums.length === 0}
+  {#if albums.length === 0 && playerState.isLoadingAlbums}
+    <div class="empty-state">読み込み中…</div>
+  {:else if albums.length === 0}
     <div class="empty-state">
       このディレクトリ配下にはアルバムが見つかりませんでした。<br />
       上の [📁 フォルダ] から音楽フォルダを選択してください。

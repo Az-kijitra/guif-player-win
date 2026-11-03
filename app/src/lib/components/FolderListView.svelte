@@ -171,7 +171,7 @@
 <div class="folder-view">
   {#if items.length === 0}
     <div class="empty-state">
-      このフォルダにはアイテムがありません。
+      {playerState.isLoadingFolder ? "読み込み中…" : "このフォルダにはアイテムがありません。"}
     </div>
   {:else}
     <div class="list-table">

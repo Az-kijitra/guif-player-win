@@ -650,8 +650,12 @@ impl AudioPlayer {
             volume: self.volume,
             shuffle_mode: self.queue.shuffle(),
             repeat_mode: self.queue.repeat_mode(),
-            queue: self.queue.tracks().to_vec(),
+            queue_version: self.queue.version(),
         }
+    }
+
+    pub fn queue_tracks(&self) -> Vec<AudioTrack> {
+        self.queue.tracks().to_vec()
     }
 
     pub fn suspend_if_playing(&mut self, paths: &[String]) -> Option<(AudioTrack, u64, bool)> {

@@ -38,6 +38,7 @@ export const api = {
   toggleShuffle: () => invoke<boolean>("toggle_shuffle"),
   toggleRepeat: () => invoke<number>("toggle_repeat"),
   getPlaybackState: () => invoke<PlaybackState>("get_playback_state"),
+  getQueue: () => invoke<AudioTrack[]>("get_queue"),
 
   // Resumes
   saveAlbumResume: (albumPath: string, lastFilePath: string, positionMs: number) =>

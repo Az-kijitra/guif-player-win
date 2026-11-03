@@ -88,8 +88,15 @@ class PlayerStore {
     volume: 1.0,
     shuffle_mode: false,
     repeat_mode: 0,
-    queue: [],
+    queue_version: 0,
   });
+  queue = $state<AudioTrack[]>([]);
+
+  isLoadingFolder = $state<boolean>(false);
+  isLoadingAlbums = $state<boolean>(false);
+  // Scans run in the background now, so an older answer can arrive after a newer request
+  private latestFolderRequest = 0;
+  private latestAlbumRequest = 0;
 
   errorMessage = $state<string | null>(null);
   private errorTimer: ReturnType<typeof setTimeout> | null = null;
@@ -154,10 +161,12 @@ class PlayerStore {
 
   startSync() {
     if (this.syncInterval) clearInterval(this.syncInterval);
+    let polling = false;
     this.syncInterval = window.setInterval(async () => {
+      if (polling) return;
+      polling = true;
       try {
-        const state = await api.getPlaybackState();
-        this.playback = state;
+        const state = await this.refreshPlayback();
 
         if (state.current_track?.file_path !== this.lastArtworkTrackPath) {
           this.lastArtworkTrackPath = state.current_track?.file_path ?? null;
@@ -169,17 +178,38 @@ class PlayerStore {
         }
       } catch {
         // Ignored during shutdown or hot reload
+      } finally {
+        polling = false;
       }
     }, 250);
   }
 
+  private async refreshPlayback() {
+    const state = await api.getPlaybackState();
+    if (state.queue_version !== this.playback.queue_version) {
+      this.queue = await api.getQueue();
+    }
+    this.playback = state;
+    return state;
+  }
+
   async navigateTo(path: string) {
-    this.currentPath = path;
+    const request = ++this.latestFolderRequest;
+    this.isLoadingFolder = true;
     try {
-      this.folderContent = await api.listFolder(path);
+      const content = await api.listFolder(path);
+      if (request !== this.latestFolderRequest) return;
+      this.currentPath = path;
+      this.folderContent = content;
       await this.loadResumes();
     } catch (e) {
-      this.reportError("フォルダーを開けません", e);
+      if (request === this.latestFolderRequest) {
+        this.reportError("フォルダーを開けません", e);
+      }
+    } finally {
+      if (request === this.latestFolderRequest) {
+        this.isLoadingFolder = false;
+      }
     }
   }
 
@@ -191,10 +221,21 @@ class PlayerStore {
 
   async loadAlbums() {
     if (!this.currentPath) return;
+    const request = ++this.latestAlbumRequest;
+    this.isLoadingAlbums = true;
     try {
-      this.albums = await api.listAlbums(this.currentPath);
+      const albums = await api.listAlbums(this.currentPath);
+      if (request === this.latestAlbumRequest) {
+        this.albums = albums;
+      }
     } catch (e) {
-      this.reportError("アルバムを読み込めません", e);
+      if (request === this.latestAlbumRequest) {
+        this.reportError("アルバムを読み込めません", e);
+      }
+    } finally {
+      if (request === this.latestAlbumRequest) {
+        this.isLoadingAlbums = false;
+      }
     }
   }
 
@@ -282,7 +323,7 @@ class PlayerStore {
       const initialPos = resume && !resume.is_completed ? resume.position_ms : 0;
 
       await api.playQueue(trackList, Math.max(0, index), initialPos);
-      this.playback = await api.getPlaybackState();
+      await this.refreshPlayback();
     } catch (e) {
       this.showError(String(e));
     }

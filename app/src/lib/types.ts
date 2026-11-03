@@ -40,7 +40,7 @@ export interface PlaybackState {
   volume: number;
   shuffle_mode: boolean;
   repeat_mode: number; // 0 = off, 1 = one, 2 = all
-  queue: AudioTrack[];
+  queue_version: number;
 }
 
 export interface AlbumResume {

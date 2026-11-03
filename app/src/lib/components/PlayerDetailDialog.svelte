@@ -124,11 +124,11 @@
         <!-- Right: Playback Queue -->
         <div class="right-pane">
           <div class="queue-header">
-            再生キュー ({playerState.playback.queue.length} 曲)
+            再生キュー ({playerState.queue.length} 曲)
           </div>
 
           <div class="queue-list">
-            {#each playerState.playback.queue as qTrack, idx}
+            {#each playerState.queue as qTrack, idx}
               {@const isCur = qTrack.file_path === track?.file_path}
               <div
                 class="queue-item"
@@ -138,13 +138,13 @@
                 onclick={() =>
                   playerState.playTrackInList(
                     qTrack,
-                    playerState.playback.queue
+                    playerState.queue
                   )}
                 onkeydown={(e) => {
                   if (e.key === "Enter")
                     playerState.playTrackInList(
                       qTrack,
-                      playerState.playback.queue
+                      playerState.queue
                     );
                 }}
               >

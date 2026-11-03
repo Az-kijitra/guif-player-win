@@ -7,6 +7,7 @@ pub const REPEAT_ALL: u8 = 2;
 /// Track order, shuffle and repeat rules. Knows nothing about audio output.
 pub struct PlayQueue {
     tracks: Vec<AudioTrack>,
+    version: u64,
     index: usize,
     shuffle: bool,
     repeat_mode: u8,
@@ -27,6 +28,7 @@ impl PlayQueue {
     fn with_rng(rng: fastrand::Rng) -> Self {
         Self {
             tracks: Vec::new(),
+            version: 0,
             index: 0,
             shuffle: false,
             repeat_mode: REPEAT_OFF,
@@ -38,8 +40,14 @@ impl PlayQueue {
 
     pub fn set_tracks(&mut self, tracks: Vec<AudioTrack>, start_index: usize) {
         self.tracks = tracks;
+        self.version += 1;
         self.index = start_index;
         self.start_shuffle_round();
+    }
+
+    /// Changes whenever `tracks` does.
+    pub fn version(&self) -> u64 {
+        self.version
     }
 
     pub fn tracks(&self) -> &[AudioTrack] {
@@ -107,6 +115,7 @@ impl PlayQueue {
     }
 
     pub fn update_tracks(&mut self, updated_tracks: &[AudioTrack]) {
+        self.version += 1;
         for track in &mut self.tracks {
             if let Some(updated) = updated_tracks
                 .iter()
@@ -279,6 +288,23 @@ mod tests {
         let played: Vec<_> = std::iter::from_fn(|| next_path(&mut queue)).collect();
         assert_eq!(played.len(), 3);
         assert!(!played.contains(&"track11.mp3".to_string()));
+    }
+
+    #[test]
+    fn the_version_follows_the_tracks_and_nothing_else() {
+        let mut queue = queue_of(3, 1);
+        let start = queue.version();
+
+        queue.advance();
+        queue.previous();
+        queue.toggle_shuffle();
+        queue.toggle_repeat();
+        assert_eq!(queue.version(), start);
+
+        queue.update_tracks(&[track(1)]);
+        assert_eq!(queue.version(), start + 1);
+        queue.set_tracks(vec![track(5)], 0);
+        assert_eq!(queue.version(), start + 2);
     }
 
     #[test]
