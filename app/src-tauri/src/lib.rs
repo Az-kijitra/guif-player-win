@@ -441,13 +441,30 @@ fn save_theme_setting(
 // App Entrypoint
 // ----------------------------------------------------
 
+// The window does not exist yet at this point, and release builds have no console
+#[cfg(windows)]
+fn show_startup_error(message: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+
+    let wide = |text: &str| -> Vec<u16> { text.encode_utf16().chain(std::iter::once(0)).collect() };
+    let (text, title) = (wide(message), wide("guif-player"));
+    unsafe {
+        MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
+    }
+}
+
+#[cfg(not(windows))]
+fn show_startup_error(message: &str) {
+    eprintln!("{}", message);
+}
+
 pub fn run() {
     let player = AudioPlayer::new();
     let db = match Database::new() {
         Ok(d) => Arc::new(d),
         Err(e) => {
-            eprintln!("Failed to initialize database: {}", e);
-            panic!("DB init failed: {}", e);
+            show_startup_error(&format!("データを開けないため、起動できません。\n\n{}", e));
+            return;
         }
     };
 
@@ -506,7 +523,7 @@ pub fn run() {
                         }
                     }
                     if let Err(e) = p.handle_track_end() {
-                        eprintln!("Failed to play the next track: {}", e);
+                        let _ = app_handle.emit("playback-error", e);
                     }
                     record_current_track_resume(&p, &thread_db);
                     let new_state = p.get_state_dto();

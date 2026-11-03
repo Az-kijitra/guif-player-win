@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import AddToPlaylistModal from "$lib/components/AddToPlaylistModal.svelte";
   import ArtworkGridView from "$lib/components/ArtworkGridView.svelte";
+  import ErrorNotice from "$lib/components/ErrorNotice.svelte";
   import FolderListView from "$lib/components/FolderListView.svelte";
   import NowPlayingBar from "$lib/components/NowPlayingBar.svelte";
   import PathHeader from "$lib/components/PathHeader.svelte";
@@ -92,6 +93,8 @@
           playerState.showDetailDialog = false;
         } else if (playerState.playlistModalTrack) {
           playerState.playlistModalTrack = null;
+        } else if (playerState.errorMessage) {
+          playerState.clearError();
         } else {
           // Back to the list from the inspector or the header
           focusActiveNavItem();
@@ -127,6 +130,8 @@
 
   <!-- Now Playing Bar -->
   <NowPlayingBar />
+
+  <ErrorNotice />
 
   <!-- Modals -->
   <PlayerDetailDialog />

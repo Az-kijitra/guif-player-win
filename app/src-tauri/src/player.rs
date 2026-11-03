@@ -68,6 +68,37 @@ impl MediaSource for Mp4WithoutUserData {
     }
 }
 
+/// Protected MP4 audio is marked by the codec name in `moov/trak/mdia/minf/stbl/stsd`.
+fn is_drm_protected(path: &Path) -> bool {
+    let Ok(mut file) = File::open(path) else {
+        return false;
+    };
+    sample_entry_name(&mut file)
+        .ok()
+        .flatten()
+        .is_some_and(|name| matches!(&name, b"drms" | b"enca"))
+}
+
+fn sample_entry_name<R: Read + Seek>(reader: &mut R) -> std::io::Result<Option<[u8; 4]>> {
+    let end = reader.seek(SeekFrom::End(0))?;
+    let (mut start, mut stop) = (0, end);
+    for name in [b"moov", b"trak", b"mdia", b"minf", b"stbl", b"stsd"] {
+        let Some(atom) = find_atom(reader, start, stop, name)? else {
+            return Ok(None);
+        };
+        (start, stop) = (atom.body_start, atom.end);
+    }
+    // stsd: version and flags, entry count, then the entries, each with a length and a name
+    let name_position = start + 8 + 4;
+    if name_position + 4 > stop {
+        return Ok(None);
+    }
+    reader.seek(SeekFrom::Start(name_position))?;
+    let mut name = [0u8; 4];
+    reader.read_exact(&mut name)?;
+    Ok(Some(name))
+}
+
 /// Where the name of `moov/udta` is, if the file has one.
 fn find_user_data_atom<R: Read + Seek>(reader: &mut R) -> std::io::Result<Option<u64>> {
     let end = reader.seek(SeekFrom::End(0))?;
@@ -146,11 +177,17 @@ impl SymphoniaSource {
                 return Ok(src);
             }
         }
-        Self::try_open(path, None)
+        Self::try_open(path, None).map_err(|e| {
+            if is_drm_protected(path) {
+                "DRM で保護された曲は再生できません".to_string()
+            } else {
+                e
+            }
+        })
     }
 
     fn try_open(path: &Path, ext_hint: Option<&str>) -> Result<Self, String> {
-        let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
+        let file = File::open(path).map_err(|e| format!("ファイルを開けません: {}", e))?;
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
         let mut hint = Hint::new();
@@ -168,7 +205,7 @@ impl SymphoniaSource {
             .format(&hint, mss, &format_opts, &metadata_opts)
         {
             Ok(probed) => probed.format,
-            Err(probe_err) => {
+            Err(_) => {
                 let without_user_data = Mp4WithoutUserData::open(path).and_then(|source| {
                     let mss = MediaSourceStream::new(Box::new(source), Default::default());
                     symphonia::default::get_probe()
@@ -179,11 +216,11 @@ impl SymphoniaSource {
                     probed.format
                 } else {
                     // Fallback for RIFF-wrapped MP3 files (RMP3 / WAVE_FORMAT_MPEGLAYER3 0x0055)
-                    let file2 = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
+                    let file2 = File::open(path).map_err(|e| format!("ファイルを開けません: {}", e))?;
                     let mss2 = MediaSourceStream::new(Box::new(file2), Default::default());
                     match symphonia::default::formats::MpaReader::try_new(mss2, &format_opts) {
                         Ok(mpa) => Box::new(mpa),
-                        Err(_) => return Err(format!("Failed to probe format: {}", probe_err)),
+                        Err(_) => return Err("対応していない形式か、ファイルが壊れています".to_string()),
                     }
                 }
             }
@@ -193,7 +230,7 @@ impl SymphoniaSource {
             .tracks()
             .iter()
             .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-            .ok_or_else(|| "No supported audio track found".to_string())?;
+            .ok_or_else(|| "再生できる音声がありません".to_string())?;
 
         let track_id = track.id;
         let codec_params = track.codec_params.clone();
@@ -209,13 +246,13 @@ impl SymphoniaSource {
 
         let mut decoder = symphonia::default::get_codecs()
             .make(&codec_params, &DecoderOptions::default())
-            .map_err(|e| format!("Failed to create decoder: {}", e))?;
+            .map_err(|_| "この音声形式には対応していません".to_string())?;
 
         let mut decode_errors = 0;
         let decoded = loop {
             let packet = match format.next_packet() {
                 Ok(p) => p,
-                Err(e) => return Err(format!("Failed to read initial audio packet: {}", e)),
+                Err(_) => return Err("音声を読み取れません。ファイルが壊れている可能性があります".to_string()),
             };
 
             if packet.track_id() != track_id {
@@ -227,11 +264,11 @@ impl SymphoniaSource {
                 Err(SymphError::DecodeError(_)) | Err(SymphError::ResetRequired) => {
                     decode_errors += 1;
                     if decode_errors > MAX_DECODE_RETRIES {
-                        return Err("Too many initial decode errors".to_string());
+                        return Err("音声を読み取れません。ファイルが壊れている可能性があります".to_string());
                     }
                     continue;
                 }
-                Err(e) => return Err(format!("Decode error: {}", e)),
+                Err(_) => return Err("音声を読み取れません。ファイルが壊れている可能性があります".to_string()),
             }
         };
 
@@ -353,6 +390,7 @@ pub struct AudioPlayer {
     start_time: Option<Instant>,
     elapsed_before_pause: Duration,
     volume: f32,
+    failed_in_a_row: usize,
 }
 
 pub type SharedPlayer = Arc<Mutex<AudioPlayer>>;
@@ -385,14 +423,16 @@ impl AudioPlayer {
             start_time: None,
             elapsed_before_pause: Duration::ZERO,
             volume: 1.0,
+            failed_in_a_row: 0,
         }
     }
 
     pub fn play_track(&mut self, mut track: AudioTrack, initial_position_ms: u64) -> Result<(), String> {
-        let handle = self.stream_handle.as_ref().ok_or("No audio output device available")?;
+        let handle = self.stream_handle.as_ref().ok_or("音声の出力先が見つかりません")?;
 
         // Open and decode the new track BEFORE stopping the current sink
-        let mut source = SymphoniaSource::from_path(Path::new(&track.file_path))?;
+        let mut source = SymphoniaSource::from_path(Path::new(&track.file_path))
+            .map_err(|e| format!("{}: {}", track.file_name, e))?;
         if track.duration_ms == 0 {
             if let Some(dur) = source.total_duration() {
                 track.duration_ms = dur.as_millis() as u64;
@@ -402,7 +442,7 @@ impl AudioPlayer {
             let _ = source.try_seek(Duration::from_millis(initial_position_ms));
         }
 
-        let sink = Sink::try_new(handle).map_err(|e| format!("Failed to create sink: {}", e))?;
+        let sink = Sink::try_new(handle).map_err(|e| format!("音声の出力を開始できません: {}", e))?;
         sink.set_volume(self.volume);
         sink.append(source);
 
@@ -550,14 +590,21 @@ impl AudioPlayer {
         };
 
         let result = self.play_track(track, 0);
-        if result.is_err() && self.queue.repeat_mode() == REPEAT_ONE {
-            // The same file would fail again on every tick
-            self.finish_playback();
+        if result.is_ok() {
+            self.failed_in_a_row = 0;
+        } else {
+            self.failed_in_a_row += 1;
+            // Otherwise repeat would keep failing on every tick, forever
+            let every_track_failed = self.failed_in_a_row >= self.queue.tracks().len();
+            if self.queue.repeat_mode() == REPEAT_ONE || every_track_failed {
+                self.finish_playback();
+            }
         }
         result
     }
 
     fn finish_playback(&mut self) {
+        self.failed_in_a_row = 0;
         self.sink = None;
         self.is_playing = false;
         self.is_paused = false;
@@ -829,6 +876,64 @@ mod tests {
         assert!(player.check_track_end());
         player.handle_track_end().unwrap();
         assert!(!player.check_track_end());
+    }
+
+    #[test]
+    fn repeat_all_stops_once_every_track_has_failed() {
+        let mut player = player_at_track_end(3);
+        player.toggle_repeat();
+        player.toggle_repeat();
+
+        assert!(player.handle_track_end().is_err());
+        assert!(player.check_track_end(), "keeps trying the rest of the queue");
+        assert!(player.handle_track_end().is_err());
+        assert!(player.check_track_end(), "keeps trying the rest of the queue");
+        assert!(player.handle_track_end().is_err());
+
+        assert!(!player.check_track_end());
+        assert!(!player.get_state_dto().is_playing);
+    }
+
+    #[test]
+    fn a_broken_file_is_described_and_the_message_names_the_track() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("broken.wav");
+        fs::write(&path, b"not audio").unwrap();
+
+        let message = SymphoniaSource::from_path(&path).err().unwrap();
+        assert!(message.contains("壊れて"), "{message}");
+
+        let mut player = AudioPlayer::with_output(None);
+        // The output is checked first, so this reports the missing device
+        let message = player.play_track(track("a.mp3"), 0).unwrap_err();
+        assert_eq!(message, "音声の出力先が見つかりません");
+    }
+
+    fn mp4_with_codec(codec: &[u8; 4]) -> Vec<u8> {
+        let mut stsd_body = vec![0; 4];
+        stsd_body.extend_from_slice(&1u32.to_be_bytes());
+        stsd_body.extend_from_slice(&atom(codec, &[0; 8]));
+        let stsd = atom(b"stsd", &stsd_body);
+        let mdia = atom(b"mdia", &atom(b"minf", &atom(b"stbl", &stsd)));
+        [
+            atom(b"ftyp", b"M4A "),
+            atom(b"moov", &atom(b"trak", &mdia)),
+            atom(b"mdat", &[3; 40]),
+        ]
+        .concat()
+    }
+
+    #[test]
+    fn protected_audio_gets_its_own_message() {
+        for (codec, protected) in [(b"drms", true), (b"enca", true), (b"mp4a", false)] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("a.m4a");
+            fs::write(&path, mp4_with_codec(codec)).unwrap();
+
+            assert_eq!(is_drm_protected(&path), protected);
+            let message = SymphoniaSource::from_path(&path).err().unwrap();
+            assert_eq!(message.contains("DRM"), protected, "{message}");
+        }
     }
 
     #[test]

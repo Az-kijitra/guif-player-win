@@ -42,73 +42,93 @@ fn resolve_db_path(base_dir: &Path) -> PathBuf {
     }
 }
 
+// One entry per schema version; PRAGMA user_version records how many have run.
+// Never change an entry once it has shipped: add a new one.
+// The first uses IF NOT EXISTS because databases from before versioning already have these tables.
+const MIGRATIONS: &[&str] = &[
+    r#"
+    CREATE TABLE IF NOT EXISTS album_resume (
+        album_path TEXT PRIMARY KEY,
+        last_file_path TEXT NOT NULL,
+        position_ms INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS track_resume (
+        file_path TEXT PRIMARY KEY,
+        album_path TEXT NOT NULL,
+        position_ms INTEGER NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        is_completed INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS playlists (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS playlist_tracks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        playlist_id INTEGER NOT NULL,
+        file_path TEXT NOT NULL,
+        title TEXT NOT NULL,
+        artist TEXT NOT NULL,
+        album TEXT NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        sort_order INTEGER NOT NULL,
+        FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    "#,
+];
+
+/// Brings the schema up to date. Each step commits together with its version number, so a failure
+/// leaves the data as the last good step left it.
+fn run_migrations(conn: &mut Connection, migrations: &[&str]) -> std::result::Result<(), String> {
+    let describe = |e: rusqlite::Error| format!("データを更新できません: {}", e);
+
+    let version: usize = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(describe)?;
+    if version > migrations.len() {
+        return Err("より新しい版の guif-player で作られたデータです。新しい版を使ってください".to_string());
+    }
+
+    for (index, migration) in migrations.iter().enumerate().skip(version) {
+        let tx = conn.transaction().map_err(describe)?;
+        tx.execute_batch(migration).map_err(describe)?;
+        tx.pragma_update(None, "user_version", index + 1).map_err(describe)?;
+        tx.commit().map_err(describe)?;
+    }
+    Ok(())
+}
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
 
 impl Database {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> std::result::Result<Self, String> {
         Self::open_at(&resolve_db_path(&data_base_dir()))
     }
 
-    fn open_at(db_path: &Path) -> Result<Self> {
+    fn open_at(db_path: &Path) -> std::result::Result<Self, String> {
         if let Some(db_dir) = db_path.parent() {
             let _ = std::fs::create_dir_all(db_dir);
         }
 
-        let conn = Connection::open(db_path)?;
-        let db = Self {
+        let mut conn = Connection::open(db_path)
+            .map_err(|e| format!("{}: {}", db_path.display(), e))?;
+        run_migrations(&mut conn, MIGRATIONS)?;
+        Ok(Self {
             conn: Mutex::new(conn),
-        };
-        db.init_schema()?;
-        Ok(db)
-    }
-
-    fn init_schema(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS album_resume (
-                album_path TEXT PRIMARY KEY,
-                last_file_path TEXT NOT NULL,
-                position_ms INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS track_resume (
-                file_path TEXT PRIMARY KEY,
-                album_path TEXT NOT NULL,
-                position_ms INTEGER NOT NULL,
-                duration_ms INTEGER NOT NULL,
-                is_completed INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS playlists (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                created_at INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS playlist_tracks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                playlist_id INTEGER NOT NULL,
-                file_path TEXT NOT NULL,
-                title TEXT NOT NULL,
-                artist TEXT NOT NULL,
-                album TEXT NOT NULL,
-                duration_ms INTEGER NOT NULL,
-                sort_order INTEGER NOT NULL,
-                FOREIGN KEY (playlist_id) REFERENCES playlists(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS app_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-            "#,
-        )?;
-        Ok(())
+        })
     }
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
@@ -464,6 +484,119 @@ mod tests {
         assert!(legacy.exists());
         let playlists = Database::open_at(&new_path).unwrap().get_playlists().unwrap();
         assert_eq!(playlists[0].name, "new");
+    }
+
+    fn user_version(path: &Path) -> usize {
+        Connection::open(path)
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_new_database_gets_the_latest_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.db");
+
+        let db = Database::open_at(&path).unwrap();
+        db.create_playlist("works").unwrap();
+        db.set_setting("theme", "nord").unwrap();
+        drop(db);
+
+        assert_eq!(user_version(&path), MIGRATIONS.len());
+    }
+
+    #[test]
+    fn a_database_from_before_versioning_keeps_its_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.execute("INSERT INTO playlists (name, created_at) VALUES ('kept', 1)", [])
+            .unwrap();
+        drop(conn);
+        assert_eq!(user_version(&path), 0);
+
+        let db = Database::open_at(&path).unwrap();
+
+        assert_eq!(db.get_playlists().unwrap()[0].name, "kept");
+        drop(db);
+        assert_eq!(user_version(&path), MIGRATIONS.len());
+    }
+
+    #[test]
+    fn opening_twice_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.db");
+        Database::open_at(&path).unwrap().create_playlist("kept").unwrap();
+
+        let db = Database::open_at(&path).unwrap();
+
+        assert_eq!(db.get_playlists().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_database_from_a_newer_version_is_refused_and_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.db");
+        Database::open_at(&path).unwrap().create_playlist("kept").unwrap();
+        let newer = MIGRATIONS.len() + 1;
+        Connection::open(&path)
+            .unwrap()
+            .pragma_update(None, "user_version", newer)
+            .unwrap();
+
+        let message = Database::open_at(&path).err().unwrap();
+
+        assert!(message.contains("新しい版"), "{message}");
+        assert_eq!(user_version(&path), newer);
+    }
+
+    #[test]
+    fn a_failing_migration_rolls_back_and_keeps_the_earlier_steps() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = Connection::open(dir.path().join("a.db")).unwrap();
+        let steps = [
+            "CREATE TABLE first (id INTEGER);",
+            "CREATE TABLE second (id INTEGER); THIS IS NOT SQL;",
+        ];
+
+        assert!(run_migrations(&mut conn, &steps).is_err());
+
+        let version: usize = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 1);
+        let count_tables = |name: &str| -> i64 {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
+                params![name],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(count_tables("first"), 1);
+        assert_eq!(count_tables("second"), 0);
+    }
+
+    #[test]
+    fn a_later_migration_runs_on_an_older_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = Connection::open(dir.path().join("a.db")).unwrap();
+        run_migrations(&mut conn, &["CREATE TABLE first (id INTEGER);"]).unwrap();
+        conn.execute("INSERT INTO first VALUES (1)", []).unwrap();
+
+        run_migrations(
+            &mut conn,
+            &[
+                "CREATE TABLE first (id INTEGER);",
+                "ALTER TABLE first ADD COLUMN extra TEXT;",
+            ],
+        )
+        .unwrap();
+
+        let kept: i64 = conn.query_row("SELECT id FROM first", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, 1);
     }
 
     #[cfg(windows)]

@@ -16,6 +16,8 @@ import type {
 const THEME_STORAGE_KEY = "guif_player_theme_setting";
 const RESOLVED_THEME_STORAGE_KEY = "guif_player_resolved_theme";
 
+const ERROR_DISPLAY_MS = 8000;
+
 const VALID_PRESETS: ThemePreset[] = [
   "nord",
   "default",
@@ -89,11 +91,41 @@ class PlayerStore {
     queue: [],
   });
 
+  errorMessage = $state<string | null>(null);
+  private errorTimer: ReturnType<typeof setTimeout> | null = null;
+
   private syncInterval: number | null = null;
   private lastArtworkTrackPath: string | null = null;
 
+  showError(message: string) {
+    if (this.errorTimer) clearTimeout(this.errorTimer);
+    this.errorMessage = message;
+    this.errorTimer = setTimeout(() => this.clearError(), ERROR_DISPLAY_MS);
+  }
+
+  clearError() {
+    if (this.errorTimer) clearTimeout(this.errorTimer);
+    this.errorTimer = null;
+    this.errorMessage = null;
+  }
+
+  private reportError(context: string, e: unknown) {
+    console.error(`${context}:`, e);
+    this.showError(`${context}: ${e}`);
+  }
+
+  // The backend's playback messages are written for the screen
+  private async attempt(action: () => Promise<unknown>) {
+    try {
+      await action();
+    } catch (e) {
+      this.showError(String(e));
+    }
+  }
+
   async init() {
     try {
+      await api.onPlaybackError((message) => this.showError(message));
       await this.loadTheme();
       this.drives = await api.listDrives();
       const latestResume = await api.getLatestAlbumResume();
@@ -116,7 +148,7 @@ class PlayerStore {
       // Poll playback state every 250ms
       this.startSync();
     } catch (e) {
-      console.error("Failed to initialize player state:", e);
+      this.reportError("起動時の読み込みに失敗しました", e);
     }
   }
 
@@ -147,7 +179,7 @@ class PlayerStore {
       this.folderContent = await api.listFolder(path);
       await this.loadResumes();
     } catch (e) {
-      console.error("Failed to list folder:", e);
+      this.reportError("フォルダーを開けません", e);
     }
   }
 
@@ -162,7 +194,7 @@ class PlayerStore {
     try {
       this.albums = await api.listAlbums(this.currentPath);
     } catch (e) {
-      console.error("Failed to list albums:", e);
+      this.reportError("アルバムを読み込めません", e);
     }
   }
 
@@ -170,7 +202,7 @@ class PlayerStore {
     try {
       this.playlists = await api.getPlaylists();
     } catch (e) {
-      console.error("Failed to get playlists:", e);
+      this.reportError("プレイリストを読み込めません", e);
     }
   }
 
@@ -179,7 +211,7 @@ class PlayerStore {
     try {
       this.playlistTracks = await api.getPlaylistTracks(id);
     } catch (e) {
-      console.error("Failed to get playlist tracks:", e);
+      this.reportError("プレイリストの曲を読み込めません", e);
     }
   }
 
@@ -190,7 +222,7 @@ class PlayerStore {
       await this.loadPlaylists();
       await this.selectPlaylist(p.id);
     } catch (e) {
-      console.error("Failed to create playlist:", e);
+      this.reportError("プレイリストを作成できません", e);
     }
   }
 
@@ -203,7 +235,7 @@ class PlayerStore {
       }
       await this.loadPlaylists();
     } catch (e) {
-      console.error("Failed to delete playlist:", e);
+      this.reportError("プレイリストを削除できません", e);
     }
   }
 
@@ -216,7 +248,7 @@ class PlayerStore {
       }
       this.playlistModalTrack = null;
     } catch (e) {
-      console.error("Failed to add track to playlist:", e);
+      this.reportError("プレイリストに追加できません", e);
     }
   }
 
@@ -226,7 +258,7 @@ class PlayerStore {
       await this.loadPlaylists();
       await this.selectPlaylist(playlistId);
     } catch (e) {
-      console.error("Failed to remove track from playlist:", e);
+      this.reportError("プレイリストから外せません", e);
     }
   }
 
@@ -239,7 +271,7 @@ class PlayerStore {
       }
       this.trackResumes = map;
     } catch (e) {
-      console.error("Failed to load track resumes:", e);
+      this.reportError("再生位置を読み込めません", e);
     }
   }
 
@@ -252,24 +284,24 @@ class PlayerStore {
       await api.playQueue(trackList, Math.max(0, index), initialPos);
       this.playback = await api.getPlaybackState();
     } catch (e) {
-      console.error("Failed to play track queue:", e);
+      this.showError(String(e));
     }
   }
 
   async togglePlayPause() {
-    await api.togglePlayPause();
+    await this.attempt(() => api.togglePlayPause());
   }
 
   async playNext() {
-    await api.playNext();
+    await this.attempt(() => api.playNext());
   }
 
   async playPrevious() {
-    await api.playPrevious();
+    await this.attempt(() => api.playPrevious());
   }
 
   async seek(posMs: number) {
-    await api.seek(posMs);
+    await this.attempt(() => api.seek(posMs));
   }
 
   async setVolume(vol: number) {
@@ -427,7 +459,7 @@ class PlayerStore {
         localStorage.setItem(RESOLVED_THEME_STORAGE_KEY, resolved);
       }
     } catch (e) {
-      console.error("Failed to load theme setting:", e);
+      this.reportError("テーマを読み込めません", e);
     }
   }
 
@@ -445,7 +477,7 @@ class PlayerStore {
         localStorage.setItem(RESOLVED_THEME_STORAGE_KEY, resolved);
       }
     } catch (e) {
-      console.error("Failed to save theme setting:", e);
+      this.reportError("テーマを保存できません", e);
     }
   }
 }

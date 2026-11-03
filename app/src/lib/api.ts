@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   AlbumResume,
   AlbumSummary,
@@ -21,6 +22,8 @@ export const api = {
     invoke<TagUpdateResult>("update_tracks_metadata", { request }),
 
   // Playback
+  onPlaybackError: (handler: (message: string) => void) =>
+    listen<string>("playback-error", (event) => handler(event.payload)),
   playTrack: (track: AudioTrack, initialPosMs?: number) =>
     invoke<void>("play_track", { track, initialPosMs }),
   playQueue: (queue: AudioTrack[], startIndex: number, initialPosMs?: number) =>
