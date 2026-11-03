@@ -1,8 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use lofty::config::WriteOptions;
+use lofty::config::{ParseOptions, WriteOptions};
 use lofty::file::{AudioFile, TaggedFile};
+use lofty::id3::v2::{Frame, Id3v2Tag, Id3v2Version};
+use lofty::mp4::{Ilst, Mp4File};
+use lofty::mpeg::MpegFile;
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::*;
 use lofty::probe::Probe;
@@ -18,6 +21,11 @@ const TAG_TEMP_MARKER: &str = ".guif-player-tmp";
 // Writing tags must not change the length; some formats estimate it, so allow for that
 const MAX_DURATION_DRIFT: Duration = Duration::from_secs(1);
 const VERIFY_SECONDS: usize = 5;
+// The frames lofty discards when it writes ID3v2.3
+const ID3V24_ONLY_FRAMES: [&str; 14] = [
+    "ASPI", "EQU2", "RVA2", "SEEK", "SIGN", "TDEN", "TDRL", "TDTG", "TMOO", "TPRO", "TSOA", "TSOP",
+    "TSOT", "TSST",
+];
 
 pub fn is_supported_audio(path: &Path) -> bool {
     let is_temp_copy = path
@@ -209,10 +217,148 @@ fn update_file_tags(
     let temp = TempCopy(temp_copy_path(path));
     fs::copy(path, &temp.0).map_err(|e| format!("一時コピーを作成できません: {}", e))?;
 
-    let mut tagged_file = read_tagged_file(&temp.0)?;
-    let duration = tagged_file.properties().duration();
+    let duration = read_tagged_file(&temp.0)?.properties().duration();
     let audio_before = decoded_start(&temp.0);
 
+    let changes = TagChanges { path, req, index, artwork };
+    let extension = path.extension().map(|e| e.to_string_lossy().to_lowercase());
+    match extension.as_deref() {
+        Some("mp3") => write_mp3_tags(&temp.0, &changes),
+        Some("m4a") => write_mp4_tags(&temp.0, &changes),
+        _ => write_generic_tags(&temp.0, &changes),
+    }
+    .map_err(|e| format!("タグを書き込めません: {}", e))?;
+
+    check_written_file(&temp.0, req, duration, audio_before.as_deref())?;
+
+    replace_file(path, &temp.0).map_err(|e| format!("ファイルを置き換えられません: {}", e))
+}
+
+struct TagChanges<'a> {
+    path: &'a Path,
+    req: &'a TagUpdateRequest,
+    index: usize,
+    artwork: Option<&'a (MimeType, Vec<u8>)>,
+}
+
+impl TagChanges<'_> {
+    fn apply_text<T: Accessor>(&self, tag: &mut T) {
+        let req = self.req;
+
+        // 1. Title
+        if req.filename_to_title {
+            if let Some(stem) = self.path.file_stem().and_then(|s| s.to_str()) {
+                tag.set_title(stem.to_string());
+            }
+        } else if let Some(ref title) = req.title {
+            tag.set_title(title.clone());
+        }
+
+        // 2. Artist
+        if let Some(ref artist) = req.artist {
+            tag.set_artist(artist.clone());
+        }
+
+        // 3. Album
+        if let Some(ref album) = req.album {
+            tag.set_album(album.clone());
+        }
+
+        // 4. Track Number
+        if req.auto_number_tracks {
+            tag.set_track((self.index + 1) as u32);
+        } else if req.clear_track_number {
+            tag.remove_track();
+        } else if let Some(num) = req.track_number {
+            tag.set_track(num);
+        }
+    }
+
+    fn removes_artwork(&self) -> bool {
+        self.req.clear_artwork || self.artwork.is_some()
+    }
+
+    fn new_artwork(&self) -> Option<Picture> {
+        if self.req.clear_artwork {
+            return None;
+        }
+        self.artwork.map(|(mime, bytes)| {
+            Picture::unchecked(bytes.clone())
+                .pic_type(PictureType::CoverFront)
+                .mime_type(mime.clone())
+                .build()
+        })
+    }
+}
+
+fn open_for_reading(path: &Path) -> Result<fs::File, String> {
+    fs::File::open(path).map_err(|e| e.to_string())
+}
+
+// MP3 and M4A use their own tag types: going through the generic `Tag` loses what it has no
+// mapping for (malformed track numbers, the other tags in the file) and raises ID3v2.3 to v2.4.
+fn write_mp3_tags(path: &Path, changes: &TagChanges) -> Result<(), String> {
+    let mut file = MpegFile::read_from(&mut open_for_reading(path)?, ParseOptions::new())
+        .map_err(|e| e.to_string())?;
+    if file.id3v2().is_none() {
+        file.set_id3v2(Id3v2Tag::new());
+    }
+    let tag = file.id3v2_mut().ok_or("タグを作成できません")?;
+
+    changes.apply_text(tag);
+    if changes.removes_artwork() {
+        tag.retain(|frame| !matches!(frame, Frame::Picture(_)));
+    }
+    if let Some(picture) = changes.new_artwork() {
+        tag.insert_picture(picture);
+    }
+
+    // Written as is, a language outside ASCII (some encoders leave zeros) makes the whole save fail
+    tag.retain_mut(|frame| {
+        let language = match frame {
+            Frame::Comment(comment) => Some(&mut comment.language),
+            Frame::UnsynchronizedText(lyrics) => Some(&mut lyrics.language),
+            _ => None,
+        };
+        if let Some(language) = language {
+            if !language.iter().all(u8::is_ascii_alphabetic) {
+                *language = *b"XXX";
+            }
+        }
+        true
+    });
+
+    // Saving only this tag leaves the bytes of any APE or ID3v1 tag alone. Saving the whole file
+    // rewrites them too, and lofty cuts 32 bytes of audio when an APE tag has no header.
+    // Older software may not read v2.4, so stay on v2.3 unless that would lose a frame.
+    // iTunes puts v2.4 frames in v2.3 tags, and writing v2.3 would discard them.
+    let keep_older_version = tag.original_version() != Id3v2Version::V4
+        && !tag.iter().any(|frame| ID3V24_ONLY_FRAMES.contains(&frame.id_str()));
+    tag.save_to_path(path, WriteOptions::new().use_id3v23(keep_older_version))
+        .map_err(|e| e.to_string())
+}
+
+fn write_mp4_tags(path: &Path, changes: &TagChanges) -> Result<(), String> {
+    let mut file = Mp4File::read_from(&mut open_for_reading(path)?, ParseOptions::new())
+        .map_err(|e| e.to_string())?;
+    if file.ilst().is_none() {
+        file.set_ilst(Ilst::new());
+    }
+    let tag = file.ilst_mut().ok_or("タグを作成できません")?;
+
+    changes.apply_text(tag);
+    if changes.removes_artwork() {
+        tag.remove_pictures();
+    }
+    if let Some(picture) = changes.new_artwork() {
+        tag.insert_picture(picture);
+    }
+
+    file.save_to_path(path, WriteOptions::new()).map_err(|e| e.to_string())
+}
+
+fn write_generic_tags(path: &Path, changes: &TagChanges) -> Result<(), String> {
+    let mut tagged_file = read_tagged_file(path)?;
     if tagged_file.first_tag().is_none() {
         tagged_file.insert_tag(Tag::new(tagged_file.primary_tag_type()));
     }
@@ -222,15 +368,20 @@ fn update_file_tags(
         tagged_file.first_tag_mut()
     }
     .ok_or("タグを作成できません")?;
-    apply_tag_changes(tag, path, req, index, artwork);
+
+    changes.apply_text(tag);
+    if changes.removes_artwork() {
+        while !tag.pictures().is_empty() {
+            tag.remove_picture(0);
+        }
+    }
+    if let Some(picture) = changes.new_artwork() {
+        tag.push_picture(picture);
+    }
 
     tagged_file
-        .save_to_path(&temp.0, WriteOptions::default())
-        .map_err(|e| format!("タグを書き込めません: {}", e))?;
-
-    check_written_file(&temp.0, req, duration, audio_before.as_deref())?;
-
-    replace_file(path, &temp.0).map_err(|e| format!("ファイルを置き換えられません: {}", e))
+        .save_to_path(path, WriteOptions::default())
+        .map_err(|e| e.to_string())
 }
 
 /// The first seconds of the sound, or `None` for a file the decoder cannot read.
@@ -275,58 +426,6 @@ fn check_written_file(
         }
     }
     Ok(())
-}
-
-fn apply_tag_changes(
-    tag: &mut Tag,
-    path: &Path,
-    req: &TagUpdateRequest,
-    index: usize,
-    artwork: Option<&(MimeType, Vec<u8>)>,
-) {
-    // 1. Title
-    if req.filename_to_title {
-        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-            tag.set_title(stem.to_string());
-        }
-    } else if let Some(ref title) = req.title {
-        tag.set_title(title.clone());
-    }
-
-    // 2. Artist
-    if let Some(ref artist) = req.artist {
-        tag.set_artist(artist.clone());
-    }
-
-    // 3. Album
-    if let Some(ref album) = req.album {
-        tag.set_album(album.clone());
-    }
-
-    // 4. Track Number
-    if req.auto_number_tracks {
-        tag.set_track((index + 1) as u32);
-    } else if req.clear_track_number {
-        tag.remove_track();
-    } else if let Some(num) = req.track_number {
-        tag.set_track(num);
-    }
-
-    // 5. Artwork
-    if req.clear_artwork {
-        while !tag.pictures().is_empty() {
-            tag.remove_picture(0);
-        }
-    } else if let Some((mime, bytes)) = artwork {
-        while !tag.pictures().is_empty() {
-            tag.remove_picture(0);
-        }
-        let pic = Picture::unchecked(bytes.clone())
-            .pic_type(PictureType::CoverFront)
-            .mime_type(mime.clone())
-            .build();
-        tag.push_picture(pic);
-    }
 }
 
 /// The working copy keeps the extension, which is how lofty tells the format.
@@ -387,8 +486,8 @@ fn replace_file(target: &Path, replacement: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use crate::test_audio::{
-        aiff_bytes, aiff_pcm, flac_audio, flac_bytes, flac_comment_block, flac_padding_block,
-        flac_with_metadata, mp3_bytes, wav_bytes, wav_pcm,
+        aiff_bytes, aiff_pcm, ape_tag, flac_audio, flac_bytes, flac_comment_block,
+        flac_padding_block, flac_with_metadata, mp3_bytes, mp3_with_id3, wav_bytes, wav_pcm,
     };
 
     const PNG_DATA_URL: &str = "data:image/png;base64,iVBORw0KGgo=";
@@ -467,6 +566,158 @@ mod tests {
     #[test]
     fn writes_tags_and_keeps_the_audio_in_flac() {
         write_title("a.flac", &flac_bytes(), &flac_audio());
+    }
+
+    fn saves_title(path: &Path) {
+        let mut req = request(&[path]);
+        req.title = Some("Title".to_string());
+        let result = update_tags(&req).unwrap();
+        assert!(result.failed.is_empty(), "{:?}", result.failed);
+        assert_eq!(parse_track(path).title, "Title");
+    }
+
+    #[test]
+    fn mp3_keeps_its_id3_version() {
+        for version in [3, 4] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = write_file(
+                dir.path(),
+                "a.mp3",
+                &mp3_with_id3(version, &[("TIT2", b"\0Old".to_vec())], &[]),
+            );
+
+            saves_title(&path);
+
+            assert_eq!(fs::read(&path).unwrap()[3], version);
+        }
+    }
+
+    #[test]
+    fn mp3_moves_to_v24_rather_than_lose_a_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(
+            dir.path(),
+            "a.mp3",
+            &mp3_with_id3(
+                3,
+                &[
+                    ("TIT2", b"\0Old".to_vec()),
+                    ("TSOA", b"\0Sort Album".to_vec()),
+                    ("TDRL", b"\x002014-02-15".to_vec()),
+                ],
+                &[],
+            ),
+        );
+
+        saves_title(&path);
+
+        let written = fs::read(&path).unwrap();
+        assert_eq!(written[3], 4);
+        assert!(contains(&written, b"Sort Album"));
+        assert!(contains(&written, b"TDRL"));
+    }
+
+    #[test]
+    fn mp3_keeps_a_podcast_feed_url() {
+        for version in [3, 4] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = write_file(
+                dir.path(),
+                "a.mp3",
+                &mp3_with_id3(
+                    version,
+                    &[
+                        ("TIT2", b"\0Old".to_vec()),
+                        ("WFED", b"https://example.com/feed".to_vec()),
+                    ],
+                    &[],
+                ),
+            );
+
+            saves_title(&path);
+
+            assert!(contains(&fs::read(&path).unwrap(), b"example.com/feed"), "v2.{version}");
+        }
+    }
+
+    // All of these came from real libraries
+    #[test]
+    fn mp3_keeps_what_the_request_did_not_touch() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = mp3_with_id3(
+            3,
+            &[
+                ("TIT2", b"\0Old".to_vec()),
+                ("TRCK", b"\x0011/".to_vec()), // a malformed track number
+                ("TPE1", b"\0Keep".to_vec()),
+                ("PRIV", b"owner\0private data".to_vec()),
+            ],
+            &ape_tag("MP3GAIN_UNDO", "-002,-002,N"),
+        );
+        let path = write_file(dir.path(), "a.mp3", &bytes);
+
+        saves_title(&path);
+
+        let written = fs::read(&path).unwrap();
+        assert!(contains(&written, b"11/"), "track number");
+        assert!(contains(&written, b"private data"), "private frame");
+        assert!(contains(&written, b"MP3GAIN_UNDO"), "APE tag");
+        let audio = mp3_bytes();
+        let start = written.windows(4).position(|w| w == [0xFF, 0xFB, 0x90, 0x00]).unwrap();
+        let same = written[start..].iter().zip(&audio).take_while(|(a, b)| a == b).count();
+        assert_eq!(same, audio.len(), "audio differs at byte {same}; file {} bytes, audio starts {start}", written.len());
+        assert_eq!(parse_track(&path).artist, "Keep");
+    }
+
+    #[test]
+    fn mp3_with_an_invalid_comment_language_can_be_saved() {
+        for language in [[0u8, 0, 0], [0, b'H', 0xF3]] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut comment = vec![0];
+            comment.extend_from_slice(&language);
+            comment.extend_from_slice(b"\0note text");
+            let path = write_file(
+                dir.path(),
+                "a.mp3",
+                &mp3_with_id3(3, &[("TIT2", b"\0Old".to_vec()), ("COMM", comment)], &[]),
+            );
+
+            saves_title(&path);
+
+            assert!(contains(&fs::read(&path).unwrap(), b"note text"));
+        }
+    }
+
+    #[test]
+    fn mp3_without_a_tag_gets_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "a.mp3", &mp3_bytes());
+
+        saves_title(&path);
+    }
+
+    #[test]
+    fn mp3_artwork_is_replaced_and_cleared() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(
+            dir.path(),
+            "a.mp3",
+            &mp3_with_id3(3, &[("TIT2", b"\0Old".to_vec())], &[]),
+        );
+        for _ in 0..2 {
+            let mut req = request(&[&path]);
+            req.artwork_data_url = Some(PNG_DATA_URL.to_string());
+            assert!(update_tags(&req).unwrap().failed.is_empty());
+        }
+
+        let tagged = read_tagged_file(&path).unwrap();
+        assert_eq!(tagged.primary_tag().unwrap().pictures().len(), 1);
+        assert!(extract_artwork(&path).unwrap().starts_with("data:image/png;base64,"));
+
+        let mut req = request(&[&path]);
+        req.clear_artwork = true;
+        assert!(update_tags(&req).unwrap().failed.is_empty());
+        assert!(!parse_track(&path).has_artwork);
     }
 
     // lofty 0.21 damaged the audio of FLAC files whose metadata did not end in padding

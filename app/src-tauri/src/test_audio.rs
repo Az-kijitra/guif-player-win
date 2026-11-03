@@ -57,6 +57,50 @@ pub fn mp3_bytes() -> Vec<u8> {
     frame.repeat(40)
 }
 
+/// An ID3v2 tag holding the given frames, the MP3 frames, then whatever `trailer` holds.
+pub fn mp3_with_id3(version: u8, frames: &[(&str, Vec<u8>)], trailer: &[u8]) -> Vec<u8> {
+    let synchsafe = |n: usize| [(n >> 21) as u8 & 0x7F, (n >> 14) as u8 & 0x7F, (n >> 7) as u8 & 0x7F, n as u8 & 0x7F];
+
+    let mut body = Vec::new();
+    for (id, payload) in frames {
+        body.extend_from_slice(id.as_bytes());
+        if version >= 4 {
+            body.extend_from_slice(&synchsafe(payload.len()));
+        } else {
+            body.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        }
+        body.extend_from_slice(&[0, 0]); // flags
+        body.extend_from_slice(payload);
+    }
+
+    let mut bytes = b"ID3".to_vec();
+    bytes.extend_from_slice(&[version, 0, 0]);
+    bytes.extend_from_slice(&synchsafe(body.len()));
+    bytes.extend_from_slice(&body);
+    bytes.extend_from_slice(&mp3_bytes());
+    bytes.extend_from_slice(trailer);
+    bytes
+}
+
+/// An APEv2 tag with one text item, as MP3Gain leaves behind.
+pub fn ape_tag(key: &str, value: &str) -> Vec<u8> {
+    let mut item = Vec::new();
+    item.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    item.extend_from_slice(&0u32.to_le_bytes());
+    item.extend_from_slice(key.as_bytes());
+    item.push(0);
+    item.extend_from_slice(value.as_bytes());
+
+    let mut bytes = item.clone();
+    bytes.extend_from_slice(b"APETAGEX");
+    bytes.extend_from_slice(&2000u32.to_le_bytes());
+    bytes.extend_from_slice(&(item.len() as u32 + 32).to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes()); // item count
+    bytes.extend_from_slice(&0u32.to_le_bytes()); // flags
+    bytes.extend_from_slice(&[0; 8]);
+    bytes
+}
+
 pub fn flac_audio() -> Vec<u8> {
     (0..=255u8).cycle().take(4096).collect()
 }
