@@ -269,7 +269,7 @@
 
   .detail-album {
     font-size: 11px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     margin-top: 2px;
   }
 
@@ -283,7 +283,7 @@
 
   .time-label {
     font-size: 11px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     width: 44px;
     text-align: center;
     font-variant-numeric: tabular-nums;
@@ -392,7 +392,7 @@
 
   .q-num {
     width: 24px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .q-info {
@@ -410,11 +410,11 @@
 
   .q-artist {
     font-size: 10px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .q-dur {
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     font-size: 11px;
   }
 </style>

@@ -324,7 +324,7 @@
   .empty-state {
     padding: 40px;
     text-align: center;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .list-table {
@@ -402,7 +402,7 @@
   .col-num {
     width: 36px;
     text-align: center;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .table-row.is-playing .col-num {
@@ -432,14 +432,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .col-duration {
     width: 56px;
     text-align: right;
     font-variant-numeric: tabular-nums;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .col-actions {

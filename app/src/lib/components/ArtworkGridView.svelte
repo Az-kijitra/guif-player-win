@@ -127,7 +127,7 @@
   .empty-state {
     padding: 60px 20px;
     text-align: center;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     line-height: 1.6;
   }
 

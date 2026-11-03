@@ -288,7 +288,7 @@
   }
 
   .sep {
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .refresh {

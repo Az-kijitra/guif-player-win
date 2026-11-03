@@ -280,7 +280,7 @@
   .time-label {
     font-size: 11px;
     font-variant-numeric: tabular-nums;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     width: 40px;
     text-align: center;
   }

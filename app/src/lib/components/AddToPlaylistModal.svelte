@@ -135,7 +135,7 @@
 
   .close-btn {
     font-size: 18px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .close-btn:hover {
@@ -195,7 +195,7 @@
 
   .no-playlists {
     font-size: 11px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     padding: 6px 0;
   }
 

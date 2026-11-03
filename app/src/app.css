@@ -1,3 +1,8 @@
+/* Secondary text. --nord3 is a border color, too dark to read as text. */
+:root {
+  --ui-text-muted: color-mix(in srgb, var(--nord4) 85%, var(--nord0));
+}
+
 :root,
 :root[data-theme="nord"] {
   /* Nord Theme Palette (guif default preset) */
@@ -116,6 +121,8 @@
 }
 
 :root[data-theme="solarized"] {
+  /* Its text color is already at the limit of readable: nothing to mix away */
+  --ui-text-muted: var(--nord4);
   /* guif Preset::Solarized (Solarized Dark) */
   color-scheme: dark;
 

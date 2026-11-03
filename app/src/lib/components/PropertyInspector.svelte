@@ -754,7 +754,7 @@
     flex-direction: column;
     align-items: center;
     font-size: 10px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     text-align: center;
   }
 
@@ -771,7 +771,7 @@
   }
 
   .muted-note {
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .dirty-tag {
@@ -952,7 +952,7 @@
   }
 
   .meta-key {
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     flex-shrink: 0;
   }
 
@@ -965,7 +965,7 @@
 
   .meta-val.path {
     font-size: 10px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .selected-list-section {

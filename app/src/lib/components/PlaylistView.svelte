@@ -367,7 +367,7 @@
   }
 
   .count {
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     font-size: 11px;
   }
 
@@ -428,12 +428,12 @@
 
   .item-count {
     font-size: 10px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .delete-btn {
     padding: 0 4px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     font-size: 14px;
   }
 
@@ -465,7 +465,7 @@
 
   .track-summary {
     font-size: 12px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .play-all-btn {
@@ -480,7 +480,7 @@
   .empty-state, .empty-tracks {
     padding: 60px 20px;
     text-align: center;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     line-height: 1.6;
   }
 
@@ -536,7 +536,7 @@
 
   .col-num {
     width: 32px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .col-title {
@@ -559,13 +559,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .col-duration {
     width: 60px;
     text-align: right;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .col-del {
@@ -574,7 +574,7 @@
   }
 
   .del-track-btn {
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     font-size: 14px;
   }
 
