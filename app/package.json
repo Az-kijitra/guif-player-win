@@ -1,7 +1,7 @@
 {
   "name": "guif-player-win",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "description": "A keyboard-driven modern Windows audio player built with Tauri 2, Rust, and Svelte 5.",
   "license": "MIT",
@@ -19,7 +19,10 @@
     "test:watch": "vitest",
     "notices": "node scripts/third-party-notices.mjs",
     "check": "svelte-check",
-    "check:docs": "node scripts/check-docs.mjs"
+    "check:docs": "node scripts/check-docs.mjs",
+    "release:check": "node scripts/release/versions.mjs",
+    "release:build": "node scripts/release/build.mjs",
+    "release:sandbox": "node --no-warnings scripts/release/sandbox/run-sandbox-test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.2.0"

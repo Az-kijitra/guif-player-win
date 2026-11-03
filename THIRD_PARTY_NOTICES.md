@@ -2,7 +2,7 @@
 
 このファイルは `npm run notices` が依存関係から生成します。直接編集しないでください。
 
-guif-player 本体のライセンスは [MIT License](LICENSE) です。配布物には次のソフトウェアが含まれ、それぞれ記載のライセンスに従います。
+guif-player 本体のライセンスは [MIT License](LICENSE) です。配布物には次のソフトウェアが含まれ、それぞれ記載のライセンスに従います。各ライセンスの本文は [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) にあり、インストール先にも置いています。
 
 ## MPL-2.0 のソフトウェア
 
@@ -338,4 +338,6 @@ guif-player 本体のライセンスは [MIT License](LICENSE) です。配布�
 
 | 名前 | 版 | ライセンス | ソース |
 |---|---|---|---|
+| @sveltejs/kit | 3.1.1 | MIT |  |
 | @tauri-apps/api | 2.12.4 | Apache-2.0 OR MIT |  |
+| svelte | 5.57.3 | MIT |  |

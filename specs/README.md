@@ -8,6 +8,7 @@ guif-player が守るべき動作と、それを確かめる方法をまとめ�
 | [tag-editing.md](tag-editing.md) | タグの保存 |
 | [data.md](data.md) | データの保存と再生位置 |
 | [keyboard.md](keyboard.md) | キー操作 |
+| [distribution.md](distribution.md) | インストーラー |
 
 ## 読み方
 

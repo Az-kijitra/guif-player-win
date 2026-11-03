@@ -40,7 +40,20 @@ Opus (`.opus`) には今後対応する予定です。WMA (`.wma`) と、DRM で
 
 ## インストール
 
-インストーラーは最初のリリースで配布する予定です。それまではソースからビルドしてください。
+### インストーラーを使う(推奨)
+
+1. [Releases](https://github.com/Az-kijitra/guif-player-win/releases) から最新の `guif-player_<版>_x64-setup.exe` をダウンロードして実行します。
+2. 画面の案内に従って進めます。インストールは現在のユーザーだけで、管理者権限は不要です。
+3. スタートメニューの「guif-player」から起動します。
+
+> **SmartScreen の警告が出たとき**
+> インストーラーにコード署名がないため、「Windows によって PC が保護されました」と表示されることがあります。「詳細情報」を選び、表示される「実行」を押すと進めます。
+
+以前の版から更新するときは、そのまま新しいインストーラーを実行してください。データは引き継がれます。
+
+### ソースからビルドする
+
+Rust 1.90 以上、Node.js 22.17 以上、Microsoft Edge WebView2 ランタイムが必要です。
 
 ```powershell
 git clone https://github.com/Az-kijitra/guif-player-win.git
@@ -48,8 +61,6 @@ cd guif-player-win/app
 npm install
 npm run tauri build
 ```
-
-必要なものは Rust 1.90 以上、Node.js 22.12 以上、Microsoft Edge WebView2 ランタイムです。
 
 ---
 
@@ -66,7 +77,7 @@ npm run tauri build
 | `Shift` + 移動キー | 範囲選択 |
 | `Ctrl+S` | タグの保存 |
 
-全一覧は[ユーザーマニュアル](docs/user_manual.md#5-キー操作)にあります。
+全一覧は[ユーザーマニュアル](docs/user_manual.md#6-キー操作)にあります。
 
 ---
 

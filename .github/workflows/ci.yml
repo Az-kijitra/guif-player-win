@@ -40,6 +40,10 @@ jobs:
         working-directory: app
         run: npm audit --omit=dev
 
+      - name: Versions
+        working-directory: app
+        run: npm run release:check
+
       - name: Documents (links and test names)
         working-directory: app
         run: npm run check:docs

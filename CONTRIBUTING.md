@@ -8,7 +8,7 @@
 
 - Windows 10 / 11(64 ビット版)
 - Rust 1.90 以上
-- Node.js 22.12 以上
+- Node.js 22.17 以上
 - Microsoft Edge WebView2 ランタイム
 
 ```powershell
@@ -65,6 +65,10 @@ npm run tauri dev
 | タグの保存 | 再生中の曲の保存、読み取り専用のファイルを含む一括保存 |
 | CSP | `npx tauri build --debug --no-bundle` で作った実行ファイルで、一覧、アートワーク、再生 |
 | キー操作 | 3 つのビューでの移動、選択、ダイアログからの復帰 |
+
+## リリース
+
+手順は [docs/release.md](docs/release.md) にあります。
 
 ## コミットとプルリクエスト
 

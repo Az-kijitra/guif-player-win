@@ -132,4 +132,6 @@ symphonia は、後ろにチャンクがある AIFF で SSND の終端を 8 バ�
 
 テスト用の音声ファイルは `test_audio.rs` がメモリ上で作ります。音楽ファイルをリポジトリに置かないためです。
 
+インストーラーは Windows Sandbox の中で実際に確かめます([docs/release.md](release.md))。
+
 音声デバイスと実ファイルが必要な確認は手動です。手順は [CONTRIBUTING.md](../CONTRIBUTING.md) にあります。
