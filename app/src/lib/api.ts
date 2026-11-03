@@ -7,6 +7,7 @@ import type {
   PlaybackState,
   Playlist,
   TagUpdateRequest,
+  TagUpdateResult,
   TrackResume,
 } from "./types";
 
@@ -17,7 +18,7 @@ export const api = {
   listAlbums: (rootPath: string) => invoke<AlbumSummary[]>("list_albums", { rootPath }),
   getArtwork: (filePath: string) => invoke<string | null>("get_artwork", { filePath }),
   updateTracksMetadata: (request: TagUpdateRequest) =>
-    invoke<AudioTrack[]>("update_tracks_metadata", { request }),
+    invoke<TagUpdateResult>("update_tracks_metadata", { request }),
 
   // Playback
   playTrack: (track: AudioTrack, initialPosMs?: number) =>

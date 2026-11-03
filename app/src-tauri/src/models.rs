@@ -90,3 +90,15 @@ pub struct TagUpdateRequest {
     pub clear_artwork: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagUpdateFailure {
+    pub file_path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagUpdateResult {
+    pub updated: Vec<AudioTrack>,
+    pub failed: Vec<TagUpdateFailure>,
+}
+

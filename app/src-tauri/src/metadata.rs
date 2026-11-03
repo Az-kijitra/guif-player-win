@@ -1,15 +1,32 @@
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 use lofty::config::WriteOptions;
-use lofty::file::AudioFile;
+use lofty::file::{AudioFile, TaggedFile};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::Tag;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use crate::models::{AudioTrack, TagUpdateRequest};
+use rodio::Source;
+use crate::models::{AudioTrack, TagUpdateFailure, TagUpdateRequest, TagUpdateResult};
+use crate::player::SymphoniaSource;
+
+// Tag writing works on "<name>.guif-player-tmp.<ext>" next to the original
+const TAG_TEMP_MARKER: &str = ".guif-player-tmp";
+// Writing tags must not change the length; some formats estimate it, so allow for that
+const MAX_DURATION_DRIFT: Duration = Duration::from_secs(1);
+const VERIFY_SECONDS: usize = 5;
 
 pub fn is_supported_audio(path: &Path) -> bool {
+    let is_temp_copy = path
+        .file_stem()
+        .is_some_and(|stem| stem.to_string_lossy().ends_with(TAG_TEMP_MARKER));
+    if is_temp_copy {
+        return false;
+    }
+
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         matches!(
             ext.to_lowercase().as_str(),
@@ -127,113 +144,586 @@ pub fn find_folder_artwork(dir: &Path) -> Option<std::path::PathBuf> {
 }
 
 fn parse_data_url(data_url: &str) -> Result<(MimeType, Vec<u8>), String> {
-    let comma_idx = data_url.find(',').ok_or("Invalid data URL")?;
-    let header = &data_url[..comma_idx];
-    let b64_part = &data_url[comma_idx + 1..];
+    let (header, b64_part) = data_url.split_once(',').ok_or("画像を読み取れません")?;
 
-    let mime_type = if header.contains("image/png") {
-        MimeType::Png
-    } else if header.contains("image/gif") {
-        MimeType::Gif
-    } else if header.contains("image/bmp") {
-        MimeType::Bmp
-    } else if header.contains("image/tiff") {
-        MimeType::Tiff
-    } else {
-        MimeType::Jpeg
+    let mime_type = match header {
+        "data:image/jpeg;base64" => MimeType::Jpeg,
+        "data:image/png;base64" => MimeType::Png,
+        "data:image/gif;base64" => MimeType::Gif,
+        _ => return Err("対応していない画像形式です。JPEG、PNG、GIF を選んでください".to_string()),
     };
 
     let bytes = BASE64
         .decode(b64_part.trim())
-        .map_err(|e| format!("Failed to decode artwork base64: {}", e))?;
+        .map_err(|e| format!("画像を読み取れません: {}", e))?;
 
     Ok((mime_type, bytes))
 }
 
-pub fn update_tags(req: &TagUpdateRequest) -> Result<Vec<AudioTrack>, String> {
+/// Writes tags file by file. A file that fails is reported and left exactly as it was,
+/// and the rest are still written. `Err` means nothing was attempted.
+pub fn update_tags(req: &TagUpdateRequest) -> Result<TagUpdateResult, String> {
     let parsed_artwork = if let Some(ref data_url) = req.artwork_data_url {
         Some(parse_data_url(data_url)?)
     } else {
         None
     };
 
-    let mut updated_tracks = Vec::new();
+    let mut result = TagUpdateResult {
+        updated: Vec::new(),
+        failed: Vec::new(),
+    };
 
-    for (index, file_path_str) in req.file_paths.iter().enumerate() {
-        let path = Path::new(file_path_str);
-        let mut tagged_file = Probe::open(path)
-            .and_then(|p| p.read())
-            .map_err(|e| format!("Failed to read audio file '{}': {}", file_path_str, e))?;
-
-        let tag = if tagged_file.primary_tag_mut().is_some() {
-            tagged_file.primary_tag_mut().unwrap()
-        } else if tagged_file.first_tag_mut().is_some() {
-            tagged_file.first_tag_mut().unwrap()
-        } else {
-            let tag_type = tagged_file.primary_tag_type();
-            tagged_file.insert_tag(Tag::new(tag_type));
-            tagged_file.primary_tag_mut().unwrap()
-        };
-
-        // 1. Title
-        if req.filename_to_title {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                tag.set_title(stem.to_string());
-            }
-        } else if let Some(ref title) = req.title {
-            tag.set_title(title.clone());
+    for (index, file_path) in req.file_paths.iter().enumerate() {
+        let path = Path::new(file_path);
+        match update_file_tags(path, req, index, parsed_artwork.as_ref()) {
+            Ok(()) => result.updated.push(parse_track(path)),
+            Err(message) => result.failed.push(TagUpdateFailure {
+                file_path: file_path.clone(),
+                message,
+            }),
         }
-
-        // 2. Artist
-        if let Some(ref artist) = req.artist {
-            tag.set_artist(artist.clone());
-        }
-
-        // 3. Album
-        if let Some(ref album) = req.album {
-            tag.set_album(album.clone());
-        }
-
-        // 4. Track Number
-        if req.auto_number_tracks {
-            tag.set_track((index + 1) as u32);
-        } else if req.clear_track_number {
-            tag.remove_track();
-        } else if let Some(num) = req.track_number {
-            tag.set_track(num);
-        }
-
-        // 5. Artwork
-        if req.clear_artwork {
-            while !tag.pictures().is_empty() {
-                tag.remove_picture(0);
-            }
-        } else if let Some((ref mime, ref bytes)) = parsed_artwork {
-            while !tag.pictures().is_empty() {
-                tag.remove_picture(0);
-            }
-            let pic = Picture::new_unchecked(
-                PictureType::CoverFront,
-                Some(mime.clone()),
-                None,
-                bytes.clone(),
-            );
-            tag.push_picture(pic);
-        }
-
-        tagged_file
-            .save_to_path(path, WriteOptions::default())
-            .map_err(|e| format!("Failed to save tags to '{}': {}", file_path_str, e))?;
-
-        updated_tracks.push(parse_track(path));
     }
 
-    Ok(updated_tracks)
+    Ok(result)
+}
+
+fn read_tagged_file(path: &Path) -> Result<TaggedFile, String> {
+    Probe::open(path)
+        .and_then(|p| p.read())
+        .map_err(|e| format!("音声ファイルとして読み取れません: {}", e))
+}
+
+fn update_file_tags(
+    path: &Path,
+    req: &TagUpdateRequest,
+    index: usize,
+    artwork: Option<&(MimeType, Vec<u8>)>,
+) -> Result<(), String> {
+    let file_info = fs::metadata(path).map_err(|e| format!("ファイルを開けません: {}", e))?;
+    if file_info.permissions().readonly() {
+        return Err("読み取り専用のファイルです".to_string());
+    }
+
+    // All writing happens on a copy, so a failure or a crash cannot damage the original
+    let temp = TempCopy(temp_copy_path(path));
+    fs::copy(path, &temp.0).map_err(|e| format!("一時コピーを作成できません: {}", e))?;
+
+    let mut tagged_file = read_tagged_file(&temp.0)?;
+    let duration = tagged_file.properties().duration();
+    let audio_before = decoded_start(&temp.0);
+
+    if tagged_file.first_tag().is_none() {
+        tagged_file.insert_tag(Tag::new(tagged_file.primary_tag_type()));
+    }
+    let tag = if tagged_file.primary_tag().is_some() {
+        tagged_file.primary_tag_mut()
+    } else {
+        tagged_file.first_tag_mut()
+    }
+    .ok_or("タグを作成できません")?;
+    apply_tag_changes(tag, path, req, index, artwork);
+
+    tagged_file
+        .save_to_path(&temp.0, WriteOptions::default())
+        .map_err(|e| format!("タグを書き込めません: {}", e))?;
+
+    check_written_file(&temp.0, req, duration, audio_before.as_deref())?;
+
+    replace_file(path, &temp.0).map_err(|e| format!("ファイルを置き換えられません: {}", e))
+}
+
+/// The first seconds of the sound, or `None` for a file the decoder cannot read.
+fn decoded_start(path: &Path) -> Option<Vec<f32>> {
+    let source = SymphoniaSource::from_path(path).ok()?;
+    let samples = source.sample_rate() as usize * source.channels() as usize * VERIFY_SECONDS;
+    Some(source.take(samples).collect())
+}
+
+/// Last check before the original is replaced: the sound is untouched and the tags can be read back.
+fn check_written_file(
+    path: &Path,
+    req: &TagUpdateRequest,
+    duration: Duration,
+    audio_before: Option<&[f32]>,
+) -> Result<(), String> {
+    let written = read_tagged_file(path)?;
+    if written.properties().duration().abs_diff(duration) > MAX_DURATION_DRIFT {
+        return Err("書き込み後の確認に失敗しました: 再生時間が変わりました".to_string());
+    }
+    if let Some(before) = audio_before {
+        // A prefix check: symphonia reads 8 bytes past the sound chunk when an AIFF has a tag after it
+        if !decoded_start(path).is_some_and(|after| after.starts_with(before)) {
+            return Err("書き込み後の確認に失敗しました: 音声が変わりました".to_string());
+        }
+    }
+
+    let tag = written.primary_tag().or_else(|| written.first_tag());
+    let title = tag.and_then(|t| t.title());
+    let artist = tag.and_then(|t| t.artist());
+    let album = tag.and_then(|t| t.album());
+    let requested_title = if req.filename_to_title { &None } else { &req.title };
+    for (requested, actual) in [
+        (requested_title, title),
+        (&req.artist, artist),
+        (&req.album, album),
+    ] {
+        if let Some(value) = requested.as_deref().filter(|v| !v.is_empty()) {
+            if actual.as_deref() != Some(value) {
+                return Err("書き込み後の確認に失敗しました: タグを読み戻せません".to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_tag_changes(
+    tag: &mut Tag,
+    path: &Path,
+    req: &TagUpdateRequest,
+    index: usize,
+    artwork: Option<&(MimeType, Vec<u8>)>,
+) {
+    // 1. Title
+    if req.filename_to_title {
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            tag.set_title(stem.to_string());
+        }
+    } else if let Some(ref title) = req.title {
+        tag.set_title(title.clone());
+    }
+
+    // 2. Artist
+    if let Some(ref artist) = req.artist {
+        tag.set_artist(artist.clone());
+    }
+
+    // 3. Album
+    if let Some(ref album) = req.album {
+        tag.set_album(album.clone());
+    }
+
+    // 4. Track Number
+    if req.auto_number_tracks {
+        tag.set_track((index + 1) as u32);
+    } else if req.clear_track_number {
+        tag.remove_track();
+    } else if let Some(num) = req.track_number {
+        tag.set_track(num);
+    }
+
+    // 5. Artwork
+    if req.clear_artwork {
+        while !tag.pictures().is_empty() {
+            tag.remove_picture(0);
+        }
+    } else if let Some((mime, bytes)) = artwork {
+        while !tag.pictures().is_empty() {
+            tag.remove_picture(0);
+        }
+        let pic = Picture::unchecked(bytes.clone())
+            .pic_type(PictureType::CoverFront)
+            .mime_type(mime.clone())
+            .build();
+        tag.push_picture(pic);
+    }
+}
+
+/// The working copy keeps the extension, which is how lofty tells the format.
+fn temp_copy_path(path: &Path) -> PathBuf {
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let mut name = format!("{}{}", stem, TAG_TEMP_MARKER);
+    if let Some(ext) = path.extension() {
+        name.push('.');
+        name.push_str(&ext.to_string_lossy());
+    }
+    path.with_file_name(name)
+}
+
+struct TempCopy(PathBuf);
+
+impl Drop for TempCopy {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(windows)]
+fn replace_file(target: &Path, replacement: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        ReplaceFileW, REPLACEFILE_IGNORE_ACL_ERRORS, REPLACEFILE_IGNORE_MERGE_ERRORS,
+    };
+
+    let wide = |p: &Path| -> Vec<u16> {
+        p.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+    };
+    let (target_w, replacement_w) = (wide(target), wide(replacement));
+
+    // Unlike a rename, this keeps the original's creation date, attributes and permissions
+    let replaced = unsafe {
+        ReplaceFileW(
+            target_w.as_ptr(),
+            replacement_w.as_ptr(),
+            std::ptr::null(),
+            REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    if replaced != 0 {
+        return Ok(());
+    }
+    // Not every file system supports it. A rename also leaves the original intact on failure
+    fs::rename(replacement, target)
+}
+
+#[cfg(not(windows))]
+fn replace_file(target: &Path, replacement: &Path) -> std::io::Result<()> {
+    fs::rename(replacement, target)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_audio::{
+        aiff_bytes, aiff_pcm, flac_audio, flac_bytes, flac_comment_block, flac_padding_block,
+        flac_with_metadata, mp3_bytes, wav_bytes, wav_pcm,
+    };
+
+    const PNG_DATA_URL: &str = "data:image/png;base64,iVBORw0KGgo=";
+
+    fn request(paths: &[&Path]) -> TagUpdateRequest {
+        TagUpdateRequest {
+            file_paths: paths.iter().map(|p| p.to_string_lossy().to_string()).collect(),
+            title: None,
+            artist: None,
+            album: None,
+            track_number: None,
+            clear_track_number: false,
+            auto_number_tracks: false,
+            filename_to_title: false,
+            artwork_data_url: None,
+            clear_artwork: false,
+        }
+    }
+
+    fn write_file(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack.windows(needle.len()).any(|w| w == needle)
+    }
+
+    fn file_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn write_title(file_name: &str, bytes: &[u8], audio: &[u8]) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), file_name, bytes);
+        let mut req = request(&[&path]);
+        req.title = Some("新しい題名".to_string());
+        req.artist = Some("Artist".to_string());
+        req.album = Some("Album".to_string());
+        req.track_number = Some(7);
+
+        let result = update_tags(&req).unwrap();
+
+        assert!(result.failed.is_empty(), "{:?}", result.failed);
+        let track = parse_track(&path);
+        assert_eq!(track.title, "新しい題名");
+        assert_eq!(track.artist, "Artist");
+        assert_eq!(track.album, "Album");
+        assert_eq!(track.track_number, Some(7));
+        assert_eq!(result.updated[0].title, "新しい題名");
+        assert!(contains(&fs::read(&path).unwrap(), audio), "audio changed");
+        assert_eq!(file_names(dir.path()), vec![file_name.to_string()]);
+    }
+
+    #[test]
+    fn writes_tags_and_keeps_the_audio_in_wav() {
+        write_title("a.wav", &wav_bytes(), &wav_pcm());
+    }
+
+    #[test]
+    fn writes_tags_and_keeps_the_audio_in_aiff() {
+        write_title("a.aiff", &aiff_bytes(), &aiff_pcm());
+    }
+
+    #[test]
+    fn writes_tags_and_keeps_the_audio_in_mp3() {
+        write_title("a.mp3", &mp3_bytes(), &mp3_bytes());
+    }
+
+    #[test]
+    fn writes_tags_and_keeps_the_audio_in_flac() {
+        write_title("a.flac", &flac_bytes(), &flac_audio());
+    }
+
+    // lofty 0.21 damaged the audio of FLAC files whose metadata did not end in padding
+    #[test]
+    fn flac_audio_survives_every_metadata_layout() {
+        for (layout, bytes) in [
+            ("streaminfo only", flac_with_metadata(&[])),
+            ("comment last", flac_with_metadata(&[flac_comment_block(true)])),
+            (
+                "comment, then padding",
+                flac_with_metadata(&[flac_comment_block(false), flac_padding_block()]),
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = write_file(dir.path(), "a.flac", &bytes);
+            let mut req = request(&[&path]);
+            req.title = Some("Title".to_string());
+
+            let result = update_tags(&req).unwrap();
+
+            assert!(result.failed.is_empty(), "{layout}: {:?}", result.failed);
+            assert!(fs::read(&path).unwrap().ends_with(&flac_audio()), "{layout}");
+            assert_eq!(parse_track(&path).title, "Title", "{layout}");
+        }
+    }
+
+    #[test]
+    fn existing_flac_comments_are_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(
+            dir.path(),
+            "a.flac",
+            &flac_with_metadata(&[flac_comment_block(true)]),
+        );
+        let mut req = request(&[&path]);
+        req.title = Some("Title".to_string());
+
+        update_tags(&req).unwrap();
+
+        assert_eq!(parse_track(&path).artist, "Keep");
+    }
+
+    #[test]
+    fn the_final_check_notices_changed_audio() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "a.wav", &wav_bytes());
+        let duration = read_tagged_file(&path).unwrap().properties().duration();
+        let before = decoded_start(&path).unwrap();
+        let req = request(&[&path]);
+        assert!(check_written_file(&path, &req, duration, Some(&before)).is_ok());
+
+        let mut changed = before;
+        changed[10] += 0.25;
+        let message = check_written_file(&path, &req, duration, Some(&changed)).unwrap_err();
+        assert!(message.contains("音声"), "{message}");
+    }
+
+    #[test]
+    fn the_final_check_notices_a_changed_length() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "a.wav", &wav_bytes());
+        let req = request(&[&path]);
+
+        let message =
+            check_written_file(&path, &req, Duration::from_secs(60), None).unwrap_err();
+        assert!(message.contains("再生時間"), "{message}");
+    }
+
+    #[test]
+    fn the_final_check_notices_tags_that_were_not_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "a.wav", &wav_bytes());
+        let duration = read_tagged_file(&path).unwrap().properties().duration();
+        let mut req = request(&[&path]);
+        req.artist = Some("Artist".to_string());
+
+        let message = check_written_file(&path, &req, duration, None).unwrap_err();
+        assert!(message.contains("タグ"), "{message}");
+    }
+
+    #[test]
+    fn a_failed_file_stays_unchanged_and_the_others_are_still_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = write_file(dir.path(), "1.wav", &wav_bytes());
+        let broken = write_file(dir.path(), "2.wav", b"not audio at all");
+        let last = write_file(dir.path(), "3.wav", &wav_bytes());
+        let mut req = request(&[&first, &broken, &last]);
+        req.artist = Some("Artist".to_string());
+
+        let result = update_tags(&req).unwrap();
+
+        assert_eq!(result.updated.len(), 2);
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(result.failed[0].file_path, broken.to_string_lossy());
+        assert!(!result.failed[0].message.is_empty());
+        assert_eq!(parse_track(&first).artist, "Artist");
+        assert_eq!(parse_track(&last).artist, "Artist");
+        assert_eq!(fs::read(&broken).unwrap(), b"not audio at all");
+        assert_eq!(file_names(dir.path()), vec!["1.wav", "2.wav", "3.wav"]);
+    }
+
+    #[test]
+    fn a_missing_file_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing.wav");
+        let mut req = request(&[&missing]);
+        req.artist = Some("Artist".to_string());
+
+        let result = update_tags(&req).unwrap();
+
+        assert_eq!(result.failed.len(), 1);
+        assert!(file_names(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn a_read_only_file_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "a.wav", &wav_bytes());
+        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&path, permissions.clone()).unwrap();
+        let mut req = request(&[&path]);
+        req.artist = Some("Artist".to_string());
+
+        let result = update_tags(&req).unwrap();
+
+        assert_eq!(result.failed[0].message, "読み取り専用のファイルです");
+        assert_eq!(fs::read(&path).unwrap(), wav_bytes());
+        assert_eq!(file_names(dir.path()), vec!["a.wav"]);
+
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        fs::set_permissions(&path, permissions).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_file_held_open_by_another_program_stays_unchanged() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        const FILE_SHARE_READ: u32 = 1;
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "a.wav", &wav_bytes());
+        let holder = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&path)
+            .unwrap();
+        let mut req = request(&[&path]);
+        req.artist = Some("Artist".to_string());
+
+        let result = update_tags(&req).unwrap();
+
+        drop(holder);
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(fs::read(&path).unwrap(), wav_bytes());
+        assert_eq!(file_names(dir.path()), vec!["a.wav"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_creation_date_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "a.wav", &wav_bytes());
+        let created = fs::metadata(&path).unwrap().created().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let mut req = request(&[&path]);
+        req.artist = Some("Artist".to_string());
+
+        let result = update_tags(&req).unwrap();
+
+        assert!(result.failed.is_empty());
+        assert_eq!(fs::metadata(&path).unwrap().created().unwrap(), created);
+    }
+
+    #[test]
+    fn a_working_copy_left_by_a_crash_is_replaced_and_not_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "a.wav", &wav_bytes());
+        let leftover = temp_copy_path(&path);
+        fs::write(&leftover, b"left by a crash").unwrap();
+        assert!(!is_supported_audio(&leftover));
+        let mut req = request(&[&path]);
+        req.artist = Some("Artist".to_string());
+
+        let result = update_tags(&req).unwrap();
+
+        assert!(result.failed.is_empty());
+        assert_eq!(file_names(dir.path()), vec!["a.wav"]);
+    }
+
+    #[test]
+    fn numbers_tracks_in_the_order_given_and_clears_numbers() {
+        let dir = tempfile::tempdir().unwrap();
+        let second = write_file(dir.path(), "b.wav", &wav_bytes());
+        let first = write_file(dir.path(), "a.wav", &wav_bytes());
+        let mut req = request(&[&second, &first]);
+        req.auto_number_tracks = true;
+
+        update_tags(&req).unwrap();
+
+        assert_eq!(parse_track(&second).track_number, Some(1));
+        assert_eq!(parse_track(&first).track_number, Some(2));
+
+        let mut req = request(&[&second]);
+        req.clear_track_number = true;
+        update_tags(&req).unwrap();
+        assert_eq!(parse_track(&second).track_number, None);
+    }
+
+    #[test]
+    fn uses_the_file_name_as_the_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "曲名.wav", &wav_bytes());
+        let mut req = request(&[&path]);
+        req.filename_to_title = true;
+
+        update_tags(&req).unwrap();
+
+        assert_eq!(parse_track(&path).title, "曲名");
+    }
+
+    #[test]
+    fn sets_and_clears_artwork() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "a.wav", &wav_bytes());
+        let mut req = request(&[&path]);
+        req.artwork_data_url = Some(PNG_DATA_URL.to_string());
+
+        update_tags(&req).unwrap();
+
+        assert!(parse_track(&path).has_artwork);
+        assert!(extract_artwork(&path).unwrap().starts_with("data:image/png;base64,"));
+
+        let mut req = request(&[&path]);
+        req.clear_artwork = true;
+        update_tags(&req).unwrap();
+        assert!(!parse_track(&path).has_artwork);
+    }
+
+    #[test]
+    fn an_unsupported_image_stops_before_any_file_is_touched() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "a.wav", &wav_bytes());
+
+        for url in [
+            "data:image/webp;base64,AAAA",
+            "data:image/svg+xml;base64,AAAA",
+            "data:image/png;base64,!!!",
+            "no comma",
+        ] {
+            let mut req = request(&[&path]);
+            req.artwork_data_url = Some(url.to_string());
+            assert!(update_tags(&req).is_err(), "{url}");
+        }
+        assert_eq!(fs::read(&path).unwrap(), wav_bytes());
+    }
 
     #[test]
     fn playable_formats_are_listed() {
@@ -249,3 +739,4 @@ mod tests {
         }
     }
 }
+

@@ -542,50 +542,8 @@ impl AudioPlayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_audio::{aiff_bytes, pcm_samples, wav_bytes};
     use std::fs;
-
-    fn pcm_samples() -> Vec<i16> {
-        (0..4410).map(|i| ((i % 100) * 100) as i16).collect()
-    }
-
-    fn wav_bytes() -> Vec<u8> {
-        let data: Vec<u8> = pcm_samples().iter().flat_map(|s| s.to_le_bytes()).collect();
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"RIFF");
-        bytes.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
-        bytes.extend_from_slice(b"WAVEfmt ");
-        bytes.extend_from_slice(&16u32.to_le_bytes());
-        bytes.extend_from_slice(&1u16.to_le_bytes()); // PCM
-        bytes.extend_from_slice(&1u16.to_le_bytes()); // mono
-        bytes.extend_from_slice(&44100u32.to_le_bytes());
-        bytes.extend_from_slice(&88200u32.to_le_bytes());
-        bytes.extend_from_slice(&2u16.to_le_bytes());
-        bytes.extend_from_slice(&16u16.to_le_bytes());
-        bytes.extend_from_slice(b"data");
-        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
-        bytes.extend_from_slice(&data);
-        bytes
-    }
-
-    fn aiff_bytes() -> Vec<u8> {
-        let samples = pcm_samples();
-        let data: Vec<u8> = samples.iter().flat_map(|s| s.to_be_bytes()).collect();
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"FORM");
-        bytes.extend_from_slice(&(4 + 26 + 16 + data.len() as u32).to_be_bytes());
-        bytes.extend_from_slice(b"AIFFCOMM");
-        bytes.extend_from_slice(&18u32.to_be_bytes());
-        bytes.extend_from_slice(&1u16.to_be_bytes()); // mono
-        bytes.extend_from_slice(&(samples.len() as u32).to_be_bytes());
-        bytes.extend_from_slice(&16u16.to_be_bytes());
-        // 44100 as an 80-bit extended float
-        bytes.extend_from_slice(&[0x40, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0]);
-        bytes.extend_from_slice(b"SSND");
-        bytes.extend_from_slice(&(8 + data.len() as u32).to_be_bytes());
-        bytes.extend_from_slice(&[0; 8]); // offset and block size
-        bytes.extend_from_slice(&data);
-        bytes
-    }
 
     fn decoded_sample_count(file_name: &str, bytes: &[u8]) -> usize {
         let dir = tempfile::tempdir().unwrap();

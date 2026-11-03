@@ -6,6 +6,7 @@ import type {
   PlaybackState,
   Playlist,
   TagUpdateRequest,
+  TagUpdateResult,
   ThemePreset,
   ThemeSetting,
   TrackResume,
@@ -372,9 +373,11 @@ class PlayerStore {
     this.selectedTracks = copy;
   }
 
-  async updateTracksMetadata(request: TagUpdateRequest): Promise<AudioTrack[]> {
-    const updated = await api.updateTracksMetadata(request);
-    const updatedMap = new Map(updated.map((t) => [t.file_path, t]));
+  async updateTracksMetadata(request: TagUpdateRequest): Promise<TagUpdateResult> {
+    const result = await api.updateTracksMetadata(request);
+    // Nothing changed: leave the form as it is, so the user can retry
+    if (result.updated.length === 0) return result;
+    const updatedMap = new Map(result.updated.map((t) => [t.file_path, t]));
 
     // Update selectedTracks
     this.selectedTracks = this.selectedTracks.map(
@@ -403,7 +406,7 @@ class PlayerStore {
     }
     this.artworkVersion += 1;
 
-    return updated;
+    return result;
   }
 
   async loadTheme() {

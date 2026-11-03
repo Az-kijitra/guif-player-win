@@ -153,8 +153,8 @@ guif-player 本体のライセンスは [MIT License](LICENSE) です。配布�
 | libsqlite3-sys | 0.30.1 | MIT | https://github.com/rusqlite/rusqlite |
 | litemap | 0.8.3 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | lock_api | 0.4.14 | MIT OR Apache-2.0 | https://github.com/Amanieu/parking_lot |
-| lofty | 0.21.1 | MIT OR Apache-2.0 | https://github.com/Serial-ATA/lofty-rs |
-| lofty_attr | 0.11.1 | MIT OR Apache-2.0 | https://github.com/Serial-ATA/lofty-rs |
+| lofty | 0.25.5 | MIT OR Apache-2.0 | https://github.com/Serial-ATA/lofty-rs |
+| lofty_attr | 0.13.0 | MIT OR Apache-2.0 | https://github.com/Serial-ATA/lofty-rs |
 | log | 0.4.35 | MIT OR Apache-2.0 | https://github.com/rust-lang/log |
 | markup5ever | 0.39.0 | MIT OR Apache-2.0 | https://github.com/servo/html5ever |
 | memchr | 2.8.3 | Unlicense OR MIT | https://github.com/BurntSushi/memchr |
@@ -168,7 +168,7 @@ guif-player 本体のライセンスは [MIT License](LICENSE) です。配布�
 | num-conv | 0.2.2 | MIT OR Apache-2.0 | https://github.com/jhpratt/num-conv |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 | https://github.com/rust-num/num-traits |
 | ogg | 0.8.0 | BSD-3-Clause | https://github.com/RustAudio/ogg |
-| ogg_pager | 0.6.1 | MIT OR Apache-2.0 | https://github.com/Serial-ATA/lofty-rs |
+| ogg_pager | 0.8.0 | MIT OR Apache-2.0 | https://github.com/Serial-ATA/lofty-rs |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 | https://github.com/matklad/once_cell |
 | option-ext | 0.2.0 | MPL-2.0 | https://github.com/soc/option-ext.git |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 | https://github.com/Amanieu/parking_lot |

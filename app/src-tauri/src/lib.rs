@@ -4,6 +4,8 @@ pub mod models;
 pub mod player;
 pub mod queue;
 pub mod scanner;
+#[cfg(test)]
+mod test_audio;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -13,7 +15,7 @@ use tauri::{Emitter, Manager, State};
 use crate::db::Database;
 use crate::models::{
     AlbumResume, AlbumSummary, AudioTrack, FolderContent, PlaybackStateDto, Playlist,
-    TagUpdateRequest, TrackResume,
+    TagUpdateRequest, TagUpdateResult, TrackResume,
 };
 use crate::player::{AudioPlayer, SharedPlayer};
 use crate::queue::REPEAT_ONE;
@@ -66,7 +68,7 @@ fn get_artwork(file_path: String) -> Option<String> {
 fn update_tracks_metadata(
     state: State<'_, AppState>,
     request: TagUpdateRequest,
-) -> Result<Vec<AudioTrack>, String> {
+) -> Result<TagUpdateResult, String> {
     // 1. Temporarily release file handle if the currently playing track is being modified
     let suspended = {
         let mut player = state.player.lock().unwrap();
@@ -78,15 +80,15 @@ fn update_tracks_metadata(
 
     // 3. Restore playback & update in-memory queue and SQLite playlists
     match result {
-        Ok(updated_tracks) => {
+        Ok(outcome) => {
             {
                 let mut player = state.player.lock().unwrap();
-                player.restore_after_tag_update(&updated_tracks, suspended);
+                player.restore_after_tag_update(&outcome.updated, suspended);
             }
-            for track in &updated_tracks {
+            for track in &outcome.updated {
                 let _ = state.db.update_playlist_track_metadata(track);
             }
-            Ok(updated_tracks)
+            Ok(outcome)
         }
         Err(err) => {
             // Even on failure, restore playback if it was suspended

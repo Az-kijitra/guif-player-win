@@ -79,6 +79,16 @@ export interface TagUpdateRequest {
   clear_artwork: boolean;
 }
 
+export interface TagUpdateFailure {
+  file_path: string;
+  message: string;
+}
+
+export interface TagUpdateResult {
+  updated: AudioTrack[];
+  failed: TagUpdateFailure[];
+}
+
 export type ViewMode = "FOLDER" | "ARTWORK" | "PLAYLIST";
 
 export type ThemePreset =
