@@ -3,6 +3,9 @@ name = "guif-player"
 version = "0.1.1"
 edition = "2021"
 description = "guif-player - Windows Audio Player"
+license = "MIT"
+repository = "https://github.com/Az-kijitra/guif-player-win"
+rust-version = "1.90"
 
 [lib]
 name = "guif_player_lib"
@@ -26,6 +29,10 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 walkdir = "2"
 base64 = "0.22"
 dirs = "6"
+fastrand = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tempfile = "3"
