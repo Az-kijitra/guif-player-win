@@ -3,101 +3,89 @@
 [![CI](https://github.com/Az-kijitra/guif-player-win/actions/workflows/ci.yml/badge.svg)](https://github.com/Az-kijitra/guif-player-win/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Windows 版 `guif-player` — キーボード＆マウス対応のモダンな音楽プレイヤー（**Tauri 2 + Rust + Svelte 5**）。
+`guif-player` は、フォルダー階層のまま音楽を聴く Windows 10 / 11 向けの音楽プレーヤーです(**Tauri 2 + Rust + Svelte 5** 製)。キーボードだけでも、マウスだけでも操作できます。
 
-CUI/TUI ファイラー `tuif`、および Windows ファイラー `guif` の Nord テーマ・UI 設計を踏襲し、フォルダ階層によるブラウズ、アルバムアート一覧、プレイリスト管理、レジューム再生を備えています。
+ファイラー [guif](https://github.com/Az-kijitra/guif) と共通の配色と設計を使っています。
+
+![フォルダービュー](docs/images/folder-view.png)
 
 ---
 
 ## 主な機能
 
-- **フォルダブラウズ**: ディレクトリ構造を維持した音楽ファイルの探索
-- **アートワークグリッド**: アルバムごとのジャケット写真一覧表示
-- **プレイリスト**: 複数トラックのプレイリスト作成・保存・管理
-- **レジューム再生**: アルバムおよびトラック単位の再生位置記憶と自動復帰
-- **シャッフルとリピート**: 全曲を一度ずつ流すシャッフル、1曲リピート、全曲リピート
-- **Nord テーマ**: Polar Night / Frost / Aurora を基調とした視認性の高いUI
-- **キーボード操作**: 一覧の移動と選択、再生の操作、ビュー切替をキーボードだけで行えます
+- **フォルダーのまま聴く**: ライブラリーの登録は不要です。フォルダーを開いて再生します。
+- **続きから聴く**: 曲ごとに再生位置を記憶し、次の起動では前回のフォルダーを開きます。
+- **タグの編集**: タイトル、アーティスト、アルバム、トラック番号、ジャケットを、複数の曲にまとめて書き込めます。
+- **安全な保存**: 一時コピーへ書き込んで音声とタグを確認してから、元のファイルと置き換えます。失敗しても元のファイルは変わりません。
+- **アルバムビュー**: フォルダーごとのジャケットを一覧で表示します。
+- **プレイリスト**: 作成、追加、削除ができます。
+- **シャッフルとリピート**: 全曲を重複なく流すシャッフル、1 曲リピート、全曲リピートがあります。
+- **キーボード操作**: 一覧の移動、範囲選択、再生の操作、ビューの切り替えをキーボードだけで行えます。
+- **テーマ**: Nord、Default、Monokai、Catppuccin、Solarized、Light から選べます。guif の設定に合わせることもできます。
+
+<table>
+  <tr>
+    <td><img src="docs/images/artwork-view.png" alt="アルバムビュー"></td>
+    <td><img src="docs/images/tag-editor.png" alt="タグの一括編集"></td>
+  </tr>
+</table>
 
 ### 対応形式
 
 MP3 (`.mp3`)、FLAC (`.flac`)、AAC / ALAC (`.m4a`、`.aac`)、Ogg Vorbis (`.ogg`)、WAV (`.wav`)、AIFF (`.aif`、`.aiff`)
 
-Opus (`.opus`) には今後対応する予定です。WMA (`.wma`) と、DRM で保護された曲（iTunes Store の古い購入曲や Apple Music の曲など）は再生できません。
+Opus (`.opus`) には今後対応する予定です。WMA (`.wma`) と、DRM で保護された曲(iTunes Store の古い購入曲や Apple Music の曲など)は再生できません。
 
 ---
 
-## キー操作
+## インストール
 
-### どこでも使えるキー
+インストーラーは最初のリリースで配布する予定です。それまではソースからビルドしてください。
+
+```powershell
+git clone https://github.com/Az-kijitra/guif-player-win.git
+cd guif-player-win/app
+npm install
+npm run tauri build
+```
+
+必要なものは Rust 1.90 以上、Node.js 22.12 以上、Microsoft Edge WebView2 ランタイムです。
+
+---
+
+## 主なキー
 
 | キー | 動作 |
 |---|---|
 | `Space` | 再生 / 一時停止 |
+| `↑` `↓` `Enter` | 一覧の移動、再生、フォルダーを開く |
+| `Backspace` | 親フォルダーへ |
 | `Ctrl+→` / `Ctrl+←` | 次の曲 / 前の曲 |
-| `Alt+→` / `Alt+←` | 5秒進む / 5秒戻る |
-| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | フォルダ / アートワーク / プレイリストのビューへ切替 |
-| `Backspace` / `Alt+↑` | 親フォルダへ（フォルダビュー） |
-| `Ctrl+A` | すべての曲を選択 |
-| `Ctrl+I` | プロパティパネルの表示 / 非表示 |
-| `Ctrl+S` | プロパティの保存 |
-| `Esc` | ダイアログを閉じる / 一覧へ戻る |
+| `Alt+→` / `Alt+←` | 5 秒進む / 5 秒戻る |
+| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | フォルダー / アルバム / プレイリストのビュー |
+| `Shift` + 移動キー | 範囲選択 |
+| `Ctrl+S` | タグの保存 |
 
-### 一覧のキー
-
-| キー | 動作 |
-|---|---|
-| `↑` / `↓` | 上下へ移動（アートワークでは `←` / `→` も使えます） |
-| `PageUp` / `PageDown` | 1画面分移動 |
-| `Home` / `End` | 先頭 / 末尾へ移動 |
-| `Enter` | 曲を再生 / フォルダやアルバムを開く |
-| `Shift` + 移動キー | 選択範囲を広げる |
-| `Ctrl+Space` | 選択の切替 |
-| `I` | プロパティを編集 |
-| `P` | プレイリストに追加 |
-
-### プレイリストビューのキー
-
-| キー | 動作 |
-|---|---|
-| `Enter`（左の一覧） | プレイリストを開いて曲の一覧へ移動 |
-| `→` / `←` | 左の一覧と曲の一覧の間を移動 |
-| `Delete` | プレイリストを削除（確認あり） / 曲をプレイリストから外す |
+全一覧は[ユーザーマニュアル](docs/user_manual.md#5-キー操作)にあります。
 
 ---
 
 ## データの保存先
 
-再生位置、プレイリスト、設定は `%LOCALAPPDATA%\dev.guif.player\guif_player.db` に保存します。
+再生位置、プレイリスト、設定は `%LOCALAPPDATA%\dev.guif.player\guif_player.db` に保存します。0.1.1 以前のデータは、起動したときに自動で新しい場所へ移動します。
 
-0.1.1 以前は `%LOCALAPPDATA%\guif-player\` に保存していました。起動すると、データは自動で新しい場所へ移動します。
+ネットワークへの送信はしません。
 
 ---
 
-## 開発環境のセットアップ
+## ドキュメント
 
-### 必要要件
-- Windows 10 / 11 (64bit)
-- Rust 1.90 以上
-- Node.js 22.12 以上
-- Microsoft Edge WebView2 ランタイム
-
-### 起動方法
-```powershell
-cd app
-npm install
-npm run tauri dev
-```
-
-### テスト
-```powershell
-cd app
-npm test                                         # フロントエンド (Vitest)
-npm run check                                    # フロントエンドの型チェック
-cargo test --manifest-path src-tauri/Cargo.toml  # バックエンド (Rust)
-```
-
-プッシュすると CI が、これらに加えて `cargo fmt --check`、`cargo clippy -- -D warnings`、依存関係の検査（`npm audit`、`cargo-deny`）を実行します。
+- [ユーザーマニュアル](docs/user_manual.md): 操作、タグの編集、トラブルシューティング
+- [変更履歴](CHANGELOG.md)
+- [開発への参加](CONTRIBUTING.md): 開発環境とテスト
+- [アーキテクチャ](docs/architecture.md): 内部構造と設計の理由
+- [仕様](specs/README.md): 受入基準とテストの対応
+- [セキュリティ](SECURITY.md): 脆弱性の報告
 
 ---
 

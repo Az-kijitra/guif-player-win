@@ -40,6 +40,10 @@ jobs:
         working-directory: app
         run: npm audit --omit=dev
 
+      - name: Documents (links and test names)
+        working-directory: app
+        run: npm run check:docs
+
       - name: Frontend Tests (Vitest)
         working-directory: app
         run: npm test
