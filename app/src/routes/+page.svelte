@@ -1,17 +1,17 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import AddToPlaylistModal from "$lib/components/AddToPlaylistModal.svelte";
-  import ArtworkGridView from "$lib/components/ArtworkGridView.svelte";
-  import ErrorNotice from "$lib/components/ErrorNotice.svelte";
-  import FolderListView from "$lib/components/FolderListView.svelte";
-  import NowPlayingBar from "$lib/components/NowPlayingBar.svelte";
-  import PathHeader from "$lib/components/PathHeader.svelte";
-  import PlayerDetailDialog from "$lib/components/PlayerDetailDialog.svelte";
-  import PlaylistView from "$lib/components/PlaylistView.svelte";
-  import PropertyInspector from "$lib/components/PropertyInspector.svelte";
-  import { focusActiveNavItem } from "$lib/listNavigation";
-  import { playerState } from "$lib/playerState.svelte";
-  import type { AudioTrack } from "$lib/types";
+  import AddToPlaylistModal from "../lib/components/AddToPlaylistModal.svelte";
+  import ArtworkGridView from "../lib/components/ArtworkGridView.svelte";
+  import ErrorNotice from "../lib/components/ErrorNotice.svelte";
+  import FolderListView from "../lib/components/FolderListView.svelte";
+  import NowPlayingBar from "../lib/components/NowPlayingBar.svelte";
+  import PathHeader from "../lib/components/PathHeader.svelte";
+  import PlayerDetailDialog from "../lib/components/PlayerDetailDialog.svelte";
+  import PlaylistView from "../lib/components/PlaylistView.svelte";
+  import PropertyInspector from "../lib/components/PropertyInspector.svelte";
+  import { focusActiveNavItem } from "../lib/listNavigation";
+  import { playerState } from "../lib/playerState.svelte";
+  import type { AudioTrack } from "../lib/types";
 
   let inspectorRef = $state<{ saveChanges: () => Promise<void> } | null>(null);
 
