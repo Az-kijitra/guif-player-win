@@ -1,5 +1,8 @@
 # guif-player-win
 
+[![CI](https://github.com/Az-kijitra/guif-player-win/actions/workflows/ci.yml/badge.svg)](https://github.com/Az-kijitra/guif-player-win/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Windows 版 `guif-player` — キーボード＆マウス対応のモダンな音楽プレイヤー（**Tauri 2 + Rust + Svelte 5**）。
 
 CUI/TUI ファイラー `tuif`、および Windows ファイラー `guif` の Nord テーマ・UI 設計を踏襲し、フォルダ階層によるブラウズ、アルバムアート一覧、プレイリスト管理、レジューム再生を備えています。
@@ -76,7 +79,7 @@ Opus (`.opus`) には今後対応する予定です。WMA (`.wma`) と、DRM で
 ### 必要要件
 - Windows 10 / 11 (64bit)
 - Rust 1.90 以上
-- Node.js 20 以上
+- Node.js 22.12 以上
 - Microsoft Edge WebView2 ランタイム
 
 ### 起動方法
@@ -90,8 +93,11 @@ npm run tauri dev
 ```powershell
 cd app
 npm test                                         # フロントエンド (Vitest)
+npm run check                                    # フロントエンドの型チェック
 cargo test --manifest-path src-tauri/Cargo.toml  # バックエンド (Rust)
 ```
+
+プッシュすると CI が、これらに加えて `cargo fmt --check`、`cargo clippy -- -D warnings`、依存関係の検査（`npm audit`、`cargo-deny`）を実行します。
 
 ---
 
