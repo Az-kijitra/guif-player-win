@@ -13,7 +13,7 @@ pub fn is_supported_audio(path: &Path) -> bool {
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         matches!(
             ext.to_lowercase().as_str(),
-            "mp3" | "flac" | "m4a" | "aac" | "ogg" | "opus" | "wav" | "alac" | "wma"
+            "mp3" | "flac" | "m4a" | "aac" | "ogg" | "wav" | "aif" | "aiff"
         )
     } else {
         false
@@ -231,3 +231,21 @@ pub fn update_tags(req: &TagUpdateRequest) -> Result<Vec<AudioTrack>, String> {
     Ok(updated_tracks)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playable_formats_are_listed() {
+        for name in ["a.mp3", "a.flac", "a.m4a", "a.aac", "a.ogg", "a.wav", "a.aif", "a.aiff", "A.MP3"] {
+            assert!(is_supported_audio(Path::new(name)), "{name}");
+        }
+    }
+
+    #[test]
+    fn formats_without_a_decoder_are_not_listed() {
+        for name in ["a.opus", "a.wma", "a.alac", "a.txt", "mp3"] {
+            assert!(!is_supported_audio(Path::new(name)), "{name}");
+        }
+    }
+}

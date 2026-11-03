@@ -1,7 +1,46 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use rusqlite::{params, Connection, Result};
 use crate::models::{AlbumResume, AudioTrack, Playlist, TrackResume};
+
+// Same as the identifier in tauri.conf.json, so the uninstaller's "delete app data" covers it
+const DATA_DIR_NAME: &str = "dev.guif.player";
+// Up to 0.1.1 the database sat here, which is also the default install folder
+const LEGACY_DATA_DIR_NAME: &str = "guif-player";
+const DB_FILE_NAME: &str = "guif_player.db";
+
+fn data_base_dir() -> PathBuf {
+    // Lets tests run the real app without touching the user's data (debug builds only)
+    #[cfg(debug_assertions)]
+    if let Some(dir) = std::env::var_os("GUIF_PLAYER_DATA_DIR") {
+        let dir = PathBuf::from(dir);
+        eprintln!("[db] override dir: {}", dir.display());
+        return dir;
+    }
+    dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Finds the database under `base_dir`, moving one left in the legacy folder.
+/// If the move fails (an old version still running, say), the legacy file stays in use
+/// until the next start, so the data never looks lost behind a new empty database.
+fn resolve_db_path(base_dir: &Path) -> PathBuf {
+    let db_dir = base_dir.join(DATA_DIR_NAME);
+    let db_path = db_dir.join(DB_FILE_NAME);
+    let legacy_path = base_dir.join(LEGACY_DATA_DIR_NAME).join(DB_FILE_NAME);
+
+    if db_path.exists() || !legacy_path.exists() {
+        return db_path;
+    }
+
+    let moved = std::fs::create_dir_all(&db_dir).and_then(|_| std::fs::rename(&legacy_path, &db_path));
+    match moved {
+        Ok(()) => db_path,
+        Err(e) => {
+            eprintln!("Failed to move the database to {}: {}", db_path.display(), e);
+            legacy_path
+        }
+    }
+}
 
 pub struct Database {
     conn: Mutex<Connection>,
@@ -9,12 +48,13 @@ pub struct Database {
 
 impl Database {
     pub fn new() -> Result<Self> {
-        let db_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("guif-player");
-        
-        let _ = std::fs::create_dir_all(&db_dir);
-        let db_path = db_dir.join("guif_player.db");
+        Self::open_at(&resolve_db_path(&data_base_dir()))
+    }
+
+    fn open_at(db_path: &Path) -> Result<Self> {
+        if let Some(db_dir) = db_path.parent() {
+            let _ = std::fs::create_dir_all(db_dir);
+        }
 
         let conn = Connection::open(db_path)?;
         let db = Self {
@@ -364,5 +404,85 @@ impl Database {
             params![track.title, track.artist, track.album, track.file_path],
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn write_legacy_db(base: &Path, playlist_name: &str) -> PathBuf {
+        let path = base.join(LEGACY_DATA_DIR_NAME).join(DB_FILE_NAME);
+        let db = Database::open_at(&path).unwrap();
+        db.create_playlist(playlist_name).unwrap();
+        path
+    }
+
+    #[test]
+    fn a_fresh_install_uses_the_new_folder() {
+        let base = tempfile::tempdir().unwrap();
+        let path = resolve_db_path(base.path());
+        assert_eq!(path, base.path().join(DATA_DIR_NAME).join(DB_FILE_NAME));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn the_legacy_database_moves_with_its_data() {
+        let base = tempfile::tempdir().unwrap();
+        let legacy = write_legacy_db(base.path(), "kept");
+
+        let path = resolve_db_path(base.path());
+
+        assert_eq!(path, base.path().join(DATA_DIR_NAME).join(DB_FILE_NAME));
+        assert!(!legacy.exists());
+        let playlists = Database::open_at(&path).unwrap().get_playlists().unwrap();
+        assert_eq!(playlists[0].name, "kept");
+    }
+
+    #[test]
+    fn other_files_in_the_legacy_folder_are_left_alone() {
+        let base = tempfile::tempdir().unwrap();
+        let legacy = write_legacy_db(base.path(), "kept");
+        let exe = legacy.with_file_name("guif-player.exe");
+        fs::write(&exe, b"exe").unwrap();
+
+        resolve_db_path(base.path());
+
+        assert!(exe.exists());
+    }
+
+    #[test]
+    fn an_existing_new_database_is_never_overwritten() {
+        let base = tempfile::tempdir().unwrap();
+        let legacy = write_legacy_db(base.path(), "old");
+        let new_path = base.path().join(DATA_DIR_NAME).join(DB_FILE_NAME);
+        Database::open_at(&new_path).unwrap().create_playlist("new").unwrap();
+
+        assert_eq!(resolve_db_path(base.path()), new_path);
+
+        assert!(legacy.exists());
+        let playlists = Database::open_at(&new_path).unwrap().get_playlists().unwrap();
+        assert_eq!(playlists[0].name, "new");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_locked_legacy_database_stays_in_use() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let base = tempfile::tempdir().unwrap();
+        let legacy = write_legacy_db(base.path(), "kept");
+        let lock = fs::OpenOptions::new().read(true).share_mode(0).open(&legacy).unwrap();
+
+        assert_eq!(resolve_db_path(base.path()), legacy);
+
+        drop(lock);
+        assert!(legacy.exists());
+        // The next start moves it
+        assert_eq!(
+            resolve_db_path(base.path()),
+            base.path().join(DATA_DIR_NAME).join(DB_FILE_NAME)
+        );
     }
 }
