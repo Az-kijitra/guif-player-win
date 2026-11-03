@@ -102,4 +102,3 @@ pub struct TagUpdateResult {
     pub updated: Vec<AudioTrack>,
     pub failed: Vec<TagUpdateFailure>,
 }
-

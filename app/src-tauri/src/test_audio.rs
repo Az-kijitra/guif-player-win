@@ -59,7 +59,14 @@ pub fn mp3_bytes() -> Vec<u8> {
 
 /// An ID3v2 tag holding the given frames, the MP3 frames, then whatever `trailer` holds.
 pub fn mp3_with_id3(version: u8, frames: &[(&str, Vec<u8>)], trailer: &[u8]) -> Vec<u8> {
-    let synchsafe = |n: usize| [(n >> 21) as u8 & 0x7F, (n >> 14) as u8 & 0x7F, (n >> 7) as u8 & 0x7F, n as u8 & 0x7F];
+    let synchsafe = |n: usize| {
+        [
+            (n >> 21) as u8 & 0x7F,
+            (n >> 14) as u8 & 0x7F,
+            (n >> 7) as u8 & 0x7F,
+            n as u8 & 0x7F,
+        ]
+    };
 
     let mut body = Vec::new();
     for (id, payload) in frames {

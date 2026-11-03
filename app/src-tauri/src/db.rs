@@ -1,7 +1,7 @@
+use crate::models::{AlbumResume, AudioTrack, Playlist, TrackResume};
+use rusqlite::{params, Connection, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use rusqlite::{params, Connection, Result};
-use crate::models::{AlbumResume, AudioTrack, Playlist, TrackResume};
 
 // Same as the identifier in tauri.conf.json, so the uninstaller's "delete app data" covers it
 const DATA_DIR_NAME: &str = "dev.guif.player";
@@ -32,11 +32,16 @@ fn resolve_db_path(base_dir: &Path) -> PathBuf {
         return db_path;
     }
 
-    let moved = std::fs::create_dir_all(&db_dir).and_then(|_| std::fs::rename(&legacy_path, &db_path));
+    let moved =
+        std::fs::create_dir_all(&db_dir).and_then(|_| std::fs::rename(&legacy_path, &db_path));
     match moved {
         Ok(()) => db_path,
         Err(e) => {
-            eprintln!("Failed to move the database to {}: {}", db_path.display(), e);
+            eprintln!(
+                "Failed to move the database to {}: {}",
+                db_path.display(),
+                e
+            );
             legacy_path
         }
     }
@@ -45,8 +50,7 @@ fn resolve_db_path(base_dir: &Path) -> PathBuf {
 // One entry per schema version; PRAGMA user_version records how many have run.
 // Never change an entry once it has shipped: add a new one.
 // The first uses IF NOT EXISTS because databases from before versioning already have these tables.
-const MIGRATIONS: &[&str] = &[
-    r#"
+const MIGRATIONS: &[&str] = &[r#"
     CREATE TABLE IF NOT EXISTS album_resume (
         album_path TEXT PRIMARY KEY,
         last_file_path TEXT NOT NULL,
@@ -85,8 +89,7 @@ const MIGRATIONS: &[&str] = &[
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     );
-    "#,
-];
+    "#];
 
 /// Brings the schema up to date. Each step commits together with its version number, so a failure
 /// leaves the data as the last good step left it.
@@ -97,13 +100,16 @@ fn run_migrations(conn: &mut Connection, migrations: &[&str]) -> std::result::Re
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(describe)?;
     if version > migrations.len() {
-        return Err("より新しい版の guif-player で作られたデータです。新しい版を使ってください".to_string());
+        return Err(
+            "より新しい版の guif-player で作られたデータです。新しい版を使ってください".to_string(),
+        );
     }
 
     for (index, migration) in migrations.iter().enumerate().skip(version) {
         let tx = conn.transaction().map_err(describe)?;
         tx.execute_batch(migration).map_err(describe)?;
-        tx.pragma_update(None, "user_version", index + 1).map_err(describe)?;
+        tx.pragma_update(None, "user_version", index + 1)
+            .map_err(describe)?;
         tx.commit().map_err(describe)?;
     }
     Ok(())
@@ -123,8 +129,8 @@ impl Database {
             let _ = std::fs::create_dir_all(db_dir);
         }
 
-        let mut conn = Connection::open(db_path)
-            .map_err(|e| format!("{}: {}", db_path.display(), e))?;
+        let mut conn =
+            Connection::open(db_path).map_err(|e| format!("{}: {}", db_path.display(), e))?;
         run_migrations(&mut conn, MIGRATIONS)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -155,7 +161,12 @@ impl Database {
         Ok(())
     }
 
-    pub fn save_album_resume(&self, album_path: &str, last_file_path: &str, position_ms: u64) -> Result<()> {
+    pub fn save_album_resume(
+        &self,
+        album_path: &str,
+        last_file_path: &str,
+        position_ms: u64,
+    ) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -296,7 +307,7 @@ impl Database {
             LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id
             GROUP BY p.id
             ORDER BY p.name ASC
-            "#
+            "#,
         )?;
         let rows = stmt.query_map([], |row| {
             let track_count: i64 = row.get(3)?;
@@ -338,7 +349,10 @@ impl Database {
 
     pub fn delete_playlist(&self, playlist_id: i64) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?1", params![playlist_id])?;
+        conn.execute(
+            "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
+            params![playlist_id],
+        )?;
         conn.execute("DELETE FROM playlists WHERE id = ?1", params![playlist_id])?;
         Ok(())
     }
@@ -380,7 +394,7 @@ impl Database {
             FROM playlist_tracks
             WHERE playlist_id = ?1
             ORDER BY sort_order ASC
-            "#
+            "#,
         )?;
         let rows = stmt.query_map(params![playlist_id], |row| {
             let file_path: String = row.get(0)?;
@@ -477,12 +491,18 @@ mod tests {
         let base = tempfile::tempdir().unwrap();
         let legacy = write_legacy_db(base.path(), "old");
         let new_path = base.path().join(DATA_DIR_NAME).join(DB_FILE_NAME);
-        Database::open_at(&new_path).unwrap().create_playlist("new").unwrap();
+        Database::open_at(&new_path)
+            .unwrap()
+            .create_playlist("new")
+            .unwrap();
 
         assert_eq!(resolve_db_path(base.path()), new_path);
 
         assert!(legacy.exists());
-        let playlists = Database::open_at(&new_path).unwrap().get_playlists().unwrap();
+        let playlists = Database::open_at(&new_path)
+            .unwrap()
+            .get_playlists()
+            .unwrap();
         assert_eq!(playlists[0].name, "new");
     }
 
@@ -512,8 +532,11 @@ mod tests {
         let path = dir.path().join("a.db");
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(MIGRATIONS[0]).unwrap();
-        conn.execute("INSERT INTO playlists (name, created_at) VALUES ('kept', 1)", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO playlists (name, created_at) VALUES ('kept', 1)",
+            [],
+        )
+        .unwrap();
         drop(conn);
         assert_eq!(user_version(&path), 0);
 
@@ -528,7 +551,10 @@ mod tests {
     fn opening_twice_changes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.db");
-        Database::open_at(&path).unwrap().create_playlist("kept").unwrap();
+        Database::open_at(&path)
+            .unwrap()
+            .create_playlist("kept")
+            .unwrap();
 
         let db = Database::open_at(&path).unwrap();
 
@@ -539,7 +565,10 @@ mod tests {
     fn a_database_from_a_newer_version_is_refused_and_left_alone() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.db");
-        Database::open_at(&path).unwrap().create_playlist("kept").unwrap();
+        Database::open_at(&path)
+            .unwrap()
+            .create_playlist("kept")
+            .unwrap();
         let newer = MIGRATIONS.len() + 1;
         Connection::open(&path)
             .unwrap()
@@ -595,7 +624,9 @@ mod tests {
         )
         .unwrap();
 
-        let kept: i64 = conn.query_row("SELECT id FROM first", [], |r| r.get(0)).unwrap();
+        let kept: i64 = conn
+            .query_row("SELECT id FROM first", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(kept, 1);
     }
 
@@ -606,7 +637,11 @@ mod tests {
 
         let base = tempfile::tempdir().unwrap();
         let legacy = write_legacy_db(base.path(), "kept");
-        let lock = fs::OpenOptions::new().read(true).share_mode(0).open(&legacy).unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&legacy)
+            .unwrap();
 
         assert_eq!(resolve_db_path(base.path()), legacy);
 

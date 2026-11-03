@@ -102,7 +102,10 @@ async fn update_tracks_metadata(
     let (player, db) = (Arc::clone(&state.player), Arc::clone(&state.db));
     run_blocking(move || {
         // 1. Temporarily release file handle if the currently playing track is being modified
-        let suspended = player.lock().unwrap().suspend_if_playing(&request.file_paths);
+        let suspended = player
+            .lock()
+            .unwrap()
+            .suspend_if_playing(&request.file_paths);
 
         // 2. Perform tag writing on disk
         let result = metadata::update_tags(&request);
@@ -122,7 +125,10 @@ async fn update_tracks_metadata(
             Err(err) => {
                 // Even on failure, restore playback if it was suspended
                 if let Some(s) = suspended {
-                    player.lock().unwrap().restore_after_tag_update(&[], Some(s));
+                    player
+                        .lock()
+                        .unwrap()
+                        .restore_after_tag_update(&[], Some(s));
                 }
                 Err(err)
             }
@@ -307,7 +313,13 @@ fn save_track_resume(
 ) -> Result<(), String> {
     state
         .db
-        .save_track_resume(&file_path, &album_path, position_ms, duration_ms, is_completed)
+        .save_track_resume(
+            &file_path,
+            &album_path,
+            position_ms,
+            duration_ms,
+            is_completed,
+        )
         .map_err(|e| e.to_string())
 }
 
@@ -499,7 +511,12 @@ fn show_startup_error(message: &str) {
     let wide = |text: &str| -> Vec<u16> { text.encode_utf16().chain(std::iter::once(0)).collect() };
     let (text, title) = (wide(message), wide("guif-player"));
     unsafe {
-        MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            title.as_ptr(),
+            MB_OK | MB_ICONERROR,
+        );
     }
 }
 
@@ -553,55 +570,57 @@ pub fn run() {
             std::thread::spawn(move || {
                 let mut last_resume_save = Instant::now();
                 loop {
-                std::thread::sleep(Duration::from_millis(400));
+                    std::thread::sleep(Duration::from_millis(400));
 
-                let mut p = thread_player.lock().unwrap();
-                let state_dto = p.get_state_dto();
+                    let mut p = thread_player.lock().unwrap();
+                    let state_dto = p.get_state_dto();
 
-                // Check track end
-                if p.check_track_end() {
-                    if state_dto.repeat_mode != REPEAT_ONE {
-                        // Mark current completed in DB
-                        if let Some(cur) = &state_dto.current_track {
-                            if let Some(parent) = Path::new(&cur.file_path).parent() {
-                                let _ = thread_db.save_track_resume(
-                                    &cur.file_path,
-                                    &parent.to_string_lossy(),
-                                    cur.duration_ms,
-                                    cur.duration_ms,
-                                    true,
-                                );
+                    // Check track end
+                    if p.check_track_end() {
+                        if state_dto.repeat_mode != REPEAT_ONE {
+                            // Mark current completed in DB
+                            if let Some(cur) = &state_dto.current_track {
+                                if let Some(parent) = Path::new(&cur.file_path).parent() {
+                                    let _ = thread_db.save_track_resume(
+                                        &cur.file_path,
+                                        &parent.to_string_lossy(),
+                                        cur.duration_ms,
+                                        cur.duration_ms,
+                                        true,
+                                    );
+                                }
+                            }
+                        }
+                        if let Err(e) = p.handle_track_end() {
+                            let _ = app_handle.emit("playback-error", e);
+                        }
+                        record_current_track_resume(&p, &thread_db);
+                    } else if state_dto.is_playing
+                        && last_resume_save.elapsed() >= RESUME_SAVE_INTERVAL
+                    {
+                        last_resume_save = Instant::now();
+                        if state_dto.position_ms > 1000 {
+                            if let Some(cur) = &state_dto.current_track {
+                                if let Some(parent) = Path::new(&cur.file_path).parent() {
+                                    let album_path = parent.to_string_lossy().to_string();
+                                    let is_completed = state_dto.duration_ms > 0
+                                        && state_dto.position_ms + 3000 >= state_dto.duration_ms;
+                                    let _ = thread_db.save_album_resume(
+                                        &album_path,
+                                        &cur.file_path,
+                                        state_dto.position_ms,
+                                    );
+                                    let _ = thread_db.save_track_resume(
+                                        &cur.file_path,
+                                        &album_path,
+                                        state_dto.position_ms,
+                                        state_dto.duration_ms,
+                                        is_completed,
+                                    );
+                                }
                             }
                         }
                     }
-                    if let Err(e) = p.handle_track_end() {
-                        let _ = app_handle.emit("playback-error", e);
-                    }
-                    record_current_track_resume(&p, &thread_db);
-                } else if state_dto.is_playing && last_resume_save.elapsed() >= RESUME_SAVE_INTERVAL {
-                    last_resume_save = Instant::now();
-                    if state_dto.position_ms > 1000 {
-                        if let Some(cur) = &state_dto.current_track {
-                            if let Some(parent) = Path::new(&cur.file_path).parent() {
-                                let album_path = parent.to_string_lossy().to_string();
-                                let is_completed = state_dto.duration_ms > 0
-                                    && state_dto.position_ms + 3000 >= state_dto.duration_ms;
-                                let _ = thread_db.save_album_resume(
-                                    &album_path,
-                                    &cur.file_path,
-                                    state_dto.position_ms,
-                                );
-                                let _ = thread_db.save_track_resume(
-                                    &cur.file_path,
-                                    &album_path,
-                                    state_dto.position_ms,
-                                    state_dto.duration_ms,
-                                    is_completed,
-                                );
-                            }
-                        }
-                    }
-                }
                 }
             });
 

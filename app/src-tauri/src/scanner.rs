@@ -1,9 +1,9 @@
+use crate::metadata::{is_supported_audio, parse_track};
+use crate::models::{AlbumSummary, FolderContent, FolderItem};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
-use crate::metadata::{is_supported_audio, parse_track};
-use crate::models::{AlbumSummary, FolderContent, FolderItem};
 
 pub fn get_default_music_dir() -> String {
     dirs::audio_dir()
@@ -79,18 +79,16 @@ pub fn list_folder(folder_path: &str) -> Result<FolderContent, String> {
     }
 
     // Sort: directories first (alphabetical), then files (by track number if present, else title)
-    items.sort_by(|a, b| {
-        match (a.is_directory, b.is_directory) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            (true, true) => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-            (false, false) => {
-                let track_a_num = a.track.as_ref().and_then(|t| t.track_number);
-                let track_b_num = b.track.as_ref().and_then(|t| t.track_number);
-                match (track_a_num, track_b_num) {
-                    (Some(na), Some(nb)) if na != nb => na.cmp(&nb),
-                    _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-                }
+    items.sort_by(|a, b| match (a.is_directory, b.is_directory) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        (true, true) => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        (false, false) => {
+            let track_a_num = a.track.as_ref().and_then(|t| t.track_number);
+            let track_b_num = b.track.as_ref().and_then(|t| t.track_number);
+            match (track_a_num, track_b_num) {
+                (Some(na), Some(nb)) if na != nb => na.cmp(&nb),
+                _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
             }
         }
     });
@@ -140,16 +138,18 @@ pub fn list_albums(root_dir: &str) -> Vec<AlbumSummary> {
 
     let mut result: Vec<AlbumSummary> = album_map
         .into_iter()
-        .map(|(path, (album_name, artist_name, track_count, first_track_path, has_artwork))| {
-            AlbumSummary {
-                album_name,
-                artist_name,
-                folder_path: path.to_string_lossy().to_string(),
-                track_count,
-                first_track_path,
-                has_artwork,
-            }
-        })
+        .map(
+            |(path, (album_name, artist_name, track_count, first_track_path, has_artwork))| {
+                AlbumSummary {
+                    album_name,
+                    artist_name,
+                    folder_path: path.to_string_lossy().to_string(),
+                    track_count,
+                    first_track_path,
+                    has_artwork,
+                }
+            },
+        )
         .collect();
 
     result.sort_by_key(|a| a.album_name.to_lowercase());

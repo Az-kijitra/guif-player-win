@@ -1,9 +1,11 @@
+use crate::models::{AudioTrack, PlaybackStateDto};
+use crate::queue::{PlayQueue, REPEAT_ONE};
+use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use symphonia::core::audio::{SampleBuffer, SignalSpec};
 use symphonia::core::codecs::{Decoder as SymphDecoder, DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphError;
@@ -12,8 +14,6 @@ use symphonia::core::io::{MediaSource, MediaSourceStream};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use symphonia::core::units::{Duration as SymphDuration, Time};
-use crate::models::{AudioTrack, PlaybackStateDto};
-use crate::queue::{PlayQueue, REPEAT_ONE};
 
 const MAX_DECODE_RETRIES: usize = 64;
 
@@ -33,7 +33,12 @@ impl Mp4WithoutUserData {
         let name_position = find_user_data_atom(&mut file).ok()??;
         let len = file.metadata().ok()?.len();
         file.seek(SeekFrom::Start(0)).ok()?;
-        Some(Self { file, position: 0, name_position, len })
+        Some(Self {
+            file,
+            position: 0,
+            name_position,
+            len,
+        })
     }
 }
 
@@ -201,9 +206,12 @@ impl SymphoniaSource {
         };
         let metadata_opts = MetadataOptions::default();
 
-        let mut format: Box<dyn FormatReader> = match symphonia::default::get_probe()
-            .format(&hint, mss, &format_opts, &metadata_opts)
-        {
+        let mut format: Box<dyn FormatReader> = match symphonia::default::get_probe().format(
+            &hint,
+            mss,
+            &format_opts,
+            &metadata_opts,
+        ) {
             Ok(probed) => probed.format,
             Err(_) => {
                 let without_user_data = Mp4WithoutUserData::open(path).and_then(|source| {
@@ -216,11 +224,14 @@ impl SymphoniaSource {
                     probed.format
                 } else {
                     // Fallback for RIFF-wrapped MP3 files (RMP3 / WAVE_FORMAT_MPEGLAYER3 0x0055)
-                    let file2 = File::open(path).map_err(|e| format!("ファイルを開けません: {}", e))?;
+                    let file2 =
+                        File::open(path).map_err(|e| format!("ファイルを開けません: {}", e))?;
                     let mss2 = MediaSourceStream::new(Box::new(file2), Default::default());
                     match symphonia::default::formats::MpaReader::try_new(mss2, &format_opts) {
                         Ok(mpa) => Box::new(mpa),
-                        Err(_) => return Err("対応していない形式か、ファイルが壊れています".to_string()),
+                        Err(_) => {
+                            return Err("対応していない形式か、ファイルが壊れています".to_string())
+                        }
                     }
                 }
             }
@@ -235,14 +246,15 @@ impl SymphoniaSource {
         let track_id = track.id;
         let codec_params = track.codec_params.clone();
 
-        let total_duration = codec_params
-            .time_base
-            .zip(codec_params.n_frames)
-            .map(|(base, frames)| {
-                let Time { seconds, frac } = base.calc_time(frames);
-                let nanos = (frac.clamp(0.0, 0.999_999_999) * 1_000_000_000.0) as u32;
-                Duration::new(seconds, nanos)
-            });
+        let total_duration =
+            codec_params
+                .time_base
+                .zip(codec_params.n_frames)
+                .map(|(base, frames)| {
+                    let Time { seconds, frac } = base.calc_time(frames);
+                    let nanos = (frac.clamp(0.0, 0.999_999_999) * 1_000_000_000.0) as u32;
+                    Duration::new(seconds, nanos)
+                });
 
         let mut decoder = symphonia::default::get_codecs()
             .make(&codec_params, &DecoderOptions::default())
@@ -252,7 +264,11 @@ impl SymphoniaSource {
         let decoded = loop {
             let packet = match format.next_packet() {
                 Ok(p) => p,
-                Err(_) => return Err("音声を読み取れません。ファイルが壊れている可能性があります".to_string()),
+                Err(_) => {
+                    return Err(
+                        "音声を読み取れません。ファイルが壊れている可能性があります".to_string()
+                    )
+                }
             };
 
             if packet.track_id() != track_id {
@@ -264,11 +280,16 @@ impl SymphoniaSource {
                 Err(SymphError::DecodeError(_)) | Err(SymphError::ResetRequired) => {
                     decode_errors += 1;
                     if decode_errors > MAX_DECODE_RETRIES {
-                        return Err("音声を読み取れません。ファイルが壊れている可能性があります".to_string());
+                        return Err("音声を読み取れません。ファイルが壊れている可能性があります"
+                            .to_string());
                     }
                     continue;
                 }
-                Err(_) => return Err("音声を読み取れません。ファイルが壊れている可能性があります".to_string()),
+                Err(_) => {
+                    return Err(
+                        "音声を読み取れません。ファイルが壊れている可能性があります".to_string()
+                    )
+                }
             }
         };
 
@@ -427,8 +448,15 @@ impl AudioPlayer {
         }
     }
 
-    pub fn play_track(&mut self, mut track: AudioTrack, initial_position_ms: u64) -> Result<(), String> {
-        let handle = self.stream_handle.as_ref().ok_or("音声の出力先が見つかりません")?;
+    pub fn play_track(
+        &mut self,
+        mut track: AudioTrack,
+        initial_position_ms: u64,
+    ) -> Result<(), String> {
+        let handle = self
+            .stream_handle
+            .as_ref()
+            .ok_or("音声の出力先が見つかりません")?;
 
         // Open and decode the new track BEFORE stopping the current sink
         let mut source = SymphoniaSource::from_path(Path::new(&track.file_path))
@@ -442,7 +470,8 @@ impl AudioPlayer {
             let _ = source.try_seek(Duration::from_millis(initial_position_ms));
         }
 
-        let sink = Sink::try_new(handle).map_err(|e| format!("音声の出力を開始できません: {}", e))?;
+        let sink =
+            Sink::try_new(handle).map_err(|e| format!("音声の出力を開始できません: {}", e))?;
         sink.set_volume(self.volume);
         sink.append(source);
 
@@ -639,7 +668,11 @@ impl AudioPlayer {
     }
 
     pub fn get_state_dto(&self) -> PlaybackStateDto {
-        let duration_ms = self.current_track.as_ref().map(|t| t.duration_ms).unwrap_or(0);
+        let duration_ms = self
+            .current_track
+            .as_ref()
+            .map(|t| t.duration_ms)
+            .unwrap_or(0);
         let pos_ms = self.get_position_ms().min(duration_ms);
 
         PlaybackStateDto {
@@ -730,13 +763,20 @@ mod tests {
 
     fn mp4_bytes() -> Vec<u8> {
         let moov_body = [atom(b"mvhd", &[1; 20]), atom(b"udta", &[2; 30])].concat();
-        [atom(b"ftyp", b"M4A "), atom(b"moov", &moov_body), atom(b"mdat", &[3; 40])].concat()
+        [
+            atom(b"ftyp", b"M4A "),
+            atom(b"moov", &moov_body),
+            atom(b"mdat", &[3; 40]),
+        ]
+        .concat()
     }
 
     #[test]
     fn finds_the_user_data_atom() {
         let bytes = mp4_bytes();
-        let position = find_user_data_atom(&mut Cursor::new(&bytes)).unwrap().unwrap() as usize;
+        let position = find_user_data_atom(&mut Cursor::new(&bytes))
+            .unwrap()
+            .unwrap() as usize;
         assert_eq!(&bytes[position..position + 4], b"udta");
     }
 
@@ -748,7 +788,9 @@ mod tests {
         long.extend_from_slice(&[3; 10]);
         let bytes = [long, atom(b"moov", &atom(b"udta", &[2; 4]))].concat();
 
-        let position = find_user_data_atom(&mut Cursor::new(&bytes)).unwrap().unwrap() as usize;
+        let position = find_user_data_atom(&mut Cursor::new(&bytes))
+            .unwrap()
+            .unwrap() as usize;
         assert_eq!(&bytes[position..position + 4], b"udta");
     }
 
@@ -760,7 +802,9 @@ mod tests {
         udta.extend_from_slice(&[2; 4]);
         let bytes = atom(b"moov", &udta);
 
-        let position = find_user_data_atom(&mut Cursor::new(&bytes)).unwrap().unwrap() as usize;
+        let position = find_user_data_atom(&mut Cursor::new(&bytes))
+            .unwrap()
+            .unwrap() as usize;
         assert_eq!(&bytes[position..position + 4], b"udta");
     }
 
@@ -783,7 +827,9 @@ mod tests {
         let path = dir.path().join("a.m4a");
         let original = mp4_bytes();
         fs::write(&path, &original).unwrap();
-        let name = find_user_data_atom(&mut Cursor::new(&original)).unwrap().unwrap() as usize;
+        let name = find_user_data_atom(&mut Cursor::new(&original))
+            .unwrap()
+            .unwrap() as usize;
         let mut expected = original.clone();
         expected[name..name + 4].copy_from_slice(b"free");
 
@@ -811,12 +857,18 @@ mod tests {
 
     #[test]
     fn decodes_wav() {
-        assert_eq!(decoded_sample_count("a.wav", &wav_bytes()), pcm_samples().len());
+        assert_eq!(
+            decoded_sample_count("a.wav", &wav_bytes()),
+            pcm_samples().len()
+        );
     }
 
     #[test]
     fn decodes_aiff() {
-        assert_eq!(decoded_sample_count("a.aiff", &aiff_bytes()), pcm_samples().len());
+        assert_eq!(
+            decoded_sample_count("a.aiff", &aiff_bytes()),
+            pcm_samples().len()
+        );
     }
 
     fn track(file_path: &str) -> AudioTrack {
@@ -889,9 +941,15 @@ mod tests {
         player.toggle_repeat();
 
         assert!(player.handle_track_end().is_err());
-        assert!(player.check_track_end(), "keeps trying the rest of the queue");
+        assert!(
+            player.check_track_end(),
+            "keeps trying the rest of the queue"
+        );
         assert!(player.handle_track_end().is_err());
-        assert!(player.check_track_end(), "keeps trying the rest of the queue");
+        assert!(
+            player.check_track_end(),
+            "keeps trying the rest of the queue"
+        );
         assert!(player.handle_track_end().is_err());
 
         assert!(!player.check_track_end());

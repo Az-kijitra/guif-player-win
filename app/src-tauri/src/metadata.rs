@@ -1,6 +1,7 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use crate::models::{AudioTrack, TagUpdateFailure, TagUpdateRequest, TagUpdateResult};
+use crate::player::SymphoniaSource;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use lofty::config::{ParseOptions, WriteOptions};
 use lofty::file::{AudioFile, TaggedFile};
 use lofty::id3::v2::{Frame, Id3v2Tag, Id3v2Version};
@@ -10,11 +11,10 @@ use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::Tag;
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64;
 use rodio::Source;
-use crate::models::{AudioTrack, TagUpdateFailure, TagUpdateRequest, TagUpdateResult};
-use crate::player::SymphoniaSource;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 // Tag writing works on "<name>.guif-player-tmp.<ext>" next to the original
 const TAG_TEMP_MARKER: &str = ".guif-player-tmp";
@@ -67,7 +67,10 @@ pub fn parse_track(path: &Path) -> AudioTrack {
         let props = tagged_file.properties();
         duration_ms = props.duration().as_millis() as u64;
 
-        if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+        if let Some(tag) = tagged_file
+            .primary_tag()
+            .or_else(|| tagged_file.first_tag())
+        {
             if let Some(t) = tag.title() {
                 if !t.trim().is_empty() {
                     title = t.trim().to_string();
@@ -110,7 +113,10 @@ pub fn parse_track(path: &Path) -> AudioTrack {
 pub fn extract_artwork(path: &Path) -> Option<String> {
     // 1. Try embedded tag
     if let Ok(tagged_file) = Probe::open(path).and_then(|p| p.read()) {
-        if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+        if let Some(tag) = tagged_file
+            .primary_tag()
+            .or_else(|| tagged_file.first_tag())
+        {
             if let Some(pic) = tag.pictures().first() {
                 let mime = pic.mime_type().map(|m| m.as_str()).unwrap_or("image/jpeg");
                 let b64 = BASE64.encode(pic.data());
@@ -123,7 +129,11 @@ pub fn extract_artwork(path: &Path) -> Option<String> {
     if let Some(parent) = path.parent() {
         if let Some(cover_path) = find_folder_artwork(parent) {
             if let Ok(data) = std::fs::read(&cover_path) {
-                let ext = cover_path.extension().and_then(|e| e.to_str()).unwrap_or("jpeg").to_lowercase();
+                let ext = cover_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("jpeg")
+                    .to_lowercase();
                 let mime = match ext.as_str() {
                     "png" => "image/png",
                     "webp" => "image/webp",
@@ -140,10 +150,17 @@ pub fn extract_artwork(path: &Path) -> Option<String> {
 
 pub fn find_folder_artwork(dir: &Path) -> Option<std::path::PathBuf> {
     let candidate_names = [
-        "cover.jpg", "cover.jpeg", "cover.png",
-        "folder.jpg", "folder.jpeg", "folder.png",
-        "front.jpg", "front.jpeg", "front.png",
-        "artwork.jpg", "artwork.png",
+        "cover.jpg",
+        "cover.jpeg",
+        "cover.png",
+        "folder.jpg",
+        "folder.jpeg",
+        "folder.png",
+        "front.jpg",
+        "front.jpeg",
+        "front.png",
+        "artwork.jpg",
+        "artwork.png",
     ];
 
     for name in candidate_names {
@@ -224,7 +241,12 @@ fn update_file_tags(
     let duration = read_tagged_file(&temp.0)?.properties().duration();
     let audio_before = decoded_start(&temp.0);
 
-    let changes = TagChanges { path, req, index, artwork };
+    let changes = TagChanges {
+        path,
+        req,
+        index,
+        artwork,
+    };
     let extension = path.extension().map(|e| e.to_string_lossy().to_lowercase());
     match extension.as_deref() {
         Some("mp3") => write_mp3_tags(&temp.0, &changes),
@@ -337,7 +359,9 @@ fn write_mp3_tags(path: &Path, changes: &TagChanges) -> Result<(), String> {
     // Older software may not read v2.4, so stay on v2.3 unless that would lose a frame.
     // iTunes puts v2.4 frames in v2.3 tags, and writing v2.3 would discard them.
     let keep_older_version = tag.original_version() != Id3v2Version::V4
-        && !tag.iter().any(|frame| ID3V24_ONLY_FRAMES.contains(&frame.id_str()));
+        && !tag
+            .iter()
+            .any(|frame| ID3V24_ONLY_FRAMES.contains(&frame.id_str()));
     tag.save_to_path(path, WriteOptions::new().use_id3v23(keep_older_version))
         .map_err(|e| e.to_string())
 }
@@ -358,7 +382,8 @@ fn write_mp4_tags(path: &Path, changes: &TagChanges) -> Result<(), String> {
         tag.insert_picture(picture);
     }
 
-    file.save_to_path(path, WriteOptions::new()).map_err(|e| e.to_string())
+    file.save_to_path(path, WriteOptions::new())
+        .map_err(|e| e.to_string())
 }
 
 fn write_generic_tags(path: &Path, changes: &TagChanges) -> Result<(), String> {
@@ -417,7 +442,11 @@ fn check_written_file(
     let title = tag.and_then(|t| t.title());
     let artist = tag.and_then(|t| t.artist());
     let album = tag.and_then(|t| t.album());
-    let requested_title = if req.filename_to_title { &None } else { &req.title };
+    let requested_title = if req.filename_to_title {
+        &None
+    } else {
+        &req.title
+    };
     for (requested, actual) in [
         (requested_title, title),
         (&req.artist, artist),
@@ -459,7 +488,10 @@ fn replace_file(target: &Path, replacement: &Path) -> std::io::Result<()> {
     };
 
     let wide = |p: &Path| -> Vec<u16> {
-        p.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+        p.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
     };
     let (target_w, replacement_w) = (wide(target), wide(replacement));
 
@@ -498,7 +530,10 @@ mod tests {
 
     fn request(paths: &[&Path]) -> TagUpdateRequest {
         TagUpdateRequest {
-            file_paths: paths.iter().map(|p| p.to_string_lossy().to_string()).collect(),
+            file_paths: paths
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect(),
             title: None,
             artist: None,
             album: None,
@@ -640,7 +675,10 @@ mod tests {
 
             saves_title(&path);
 
-            assert!(contains(&fs::read(&path).unwrap(), b"example.com/feed"), "v2.{version}");
+            assert!(
+                contains(&fs::read(&path).unwrap(), b"example.com/feed"),
+                "v2.{version}"
+            );
         }
     }
 
@@ -667,9 +705,21 @@ mod tests {
         assert!(contains(&written, b"private data"), "private frame");
         assert!(contains(&written, b"MP3GAIN_UNDO"), "APE tag");
         let audio = mp3_bytes();
-        let start = written.windows(4).position(|w| w == [0xFF, 0xFB, 0x90, 0x00]).unwrap();
-        let same = written[start..].iter().zip(&audio).take_while(|(a, b)| a == b).count();
-        assert_eq!(same, audio.len(), "audio differs at byte {same}; file {} bytes, audio starts {start}", written.len());
+        let start = written
+            .windows(4)
+            .position(|w| w == [0xFF, 0xFB, 0x90, 0x00])
+            .unwrap();
+        let same = written[start..]
+            .iter()
+            .zip(&audio)
+            .take_while(|(a, b)| a == b)
+            .count();
+        assert_eq!(
+            same,
+            audio.len(),
+            "audio differs at byte {same}; file {} bytes, audio starts {start}",
+            written.len()
+        );
         assert_eq!(parse_track(&path).artist, "Keep");
     }
 
@@ -716,7 +766,9 @@ mod tests {
 
         let tagged = read_tagged_file(&path).unwrap();
         assert_eq!(tagged.primary_tag().unwrap().pictures().len(), 1);
-        assert!(extract_artwork(&path).unwrap().starts_with("data:image/png;base64,"));
+        assert!(extract_artwork(&path)
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
 
         let mut req = request(&[&path]);
         req.clear_artwork = true;
@@ -729,7 +781,10 @@ mod tests {
     fn flac_audio_survives_every_metadata_layout() {
         for (layout, bytes) in [
             ("streaminfo only", flac_with_metadata(&[])),
-            ("comment last", flac_with_metadata(&[flac_comment_block(true)])),
+            (
+                "comment last",
+                flac_with_metadata(&[flac_comment_block(true)]),
+            ),
             (
                 "comment, then padding",
                 flac_with_metadata(&[flac_comment_block(false), flac_padding_block()]),
@@ -743,7 +798,10 @@ mod tests {
             let result = update_tags(&req).unwrap();
 
             assert!(result.failed.is_empty(), "{layout}: {:?}", result.failed);
-            assert!(fs::read(&path).unwrap().ends_with(&flac_audio()), "{layout}");
+            assert!(
+                fs::read(&path).unwrap().ends_with(&flac_audio()),
+                "{layout}"
+            );
             assert_eq!(parse_track(&path).title, "Title", "{layout}");
         }
     }
@@ -785,8 +843,7 @@ mod tests {
         let path = write_file(dir.path(), "a.wav", &wav_bytes());
         let req = request(&[&path]);
 
-        let message =
-            check_written_file(&path, &req, Duration::from_secs(60), None).unwrap_err();
+        let message = check_written_file(&path, &req, Duration::from_secs(60), None).unwrap_err();
         assert!(message.contains("再生時間"), "{message}");
     }
 
@@ -954,7 +1011,9 @@ mod tests {
         update_tags(&req).unwrap();
 
         assert!(parse_track(&path).has_artwork);
-        assert!(extract_artwork(&path).unwrap().starts_with("data:image/png;base64,"));
+        assert!(extract_artwork(&path)
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
 
         let mut req = request(&[&path]);
         req.clear_artwork = true;
@@ -982,16 +1041,25 @@ mod tests {
 
     #[test]
     fn playable_formats_are_listed() {
-        for name in ["a.mp3", "a.flac", "a.m4a", "a.aac", "a.ogg", "a.wav", "a.aif", "a.aiff", "A.MP3"] {
+        for name in [
+            "a.mp3", "a.flac", "a.m4a", "a.aac", "a.ogg", "a.wav", "a.aif", "a.aiff", "A.MP3",
+        ] {
             assert!(is_supported_audio(Path::new(name)), "{name}");
         }
     }
 
     #[test]
     fn formats_without_a_decoder_are_not_listed() {
-        for name in ["a.opus", "a.wma", "a.alac", "a.txt", "mp3", "._a.mp3", "dir/._a.m4a"] {
+        for name in [
+            "a.opus",
+            "a.wma",
+            "a.alac",
+            "a.txt",
+            "mp3",
+            "._a.mp3",
+            "dir/._a.m4a",
+        ] {
             assert!(!is_supported_audio(Path::new(name)), "{name}");
         }
     }
 }
-
