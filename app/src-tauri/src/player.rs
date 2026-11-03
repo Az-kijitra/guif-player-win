@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -7,7 +8,7 @@ use symphonia::core::audio::{SampleBuffer, SignalSpec};
 use symphonia::core::codecs::{Decoder as SymphDecoder, DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphError;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
-use symphonia::core::io::MediaSourceStream;
+use symphonia::core::io::{MediaSource, MediaSourceStream};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use symphonia::core::units::{Duration as SymphDuration, Time};
@@ -15,6 +16,112 @@ use crate::models::{AudioTrack, PlaybackStateDto};
 use crate::queue::{PlayQueue, REPEAT_ONE};
 
 const MAX_DECODE_RETRIES: usize = 64;
+
+/// Reads an MP4 file as if its `udta` atom were a `free` one, leaving the file itself alone.
+/// Some taggers leave bytes in `udta` that make symphonia give up on the whole file. Playback
+/// does not need that atom: the tags are read with lofty.
+struct Mp4WithoutUserData {
+    file: File,
+    position: u64,
+    name_position: u64,
+    len: u64,
+}
+
+impl Mp4WithoutUserData {
+    fn open(path: &Path) -> Option<Self> {
+        let mut file = File::open(path).ok()?;
+        let name_position = find_user_data_atom(&mut file).ok()??;
+        let len = file.metadata().ok()?.len();
+        file.seek(SeekFrom::Start(0)).ok()?;
+        Some(Self { file, position: 0, name_position, len })
+    }
+}
+
+impl Read for Mp4WithoutUserData {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.file.read(buf)?;
+        for (offset, byte) in buf[..read].iter_mut().enumerate() {
+            let position = self.position + offset as u64;
+            if position >= self.name_position && position < self.name_position + 4 {
+                *byte = b"free"[(position - self.name_position) as usize];
+            }
+        }
+        self.position += read as u64;
+        Ok(read)
+    }
+}
+
+impl Seek for Mp4WithoutUserData {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.position = self.file.seek(pos)?;
+        Ok(self.position)
+    }
+}
+
+impl MediaSource for Mp4WithoutUserData {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        Some(self.len)
+    }
+}
+
+/// Where the name of `moov/udta` is, if the file has one.
+fn find_user_data_atom<R: Read + Seek>(reader: &mut R) -> std::io::Result<Option<u64>> {
+    let end = reader.seek(SeekFrom::End(0))?;
+    let Some(moov) = find_atom(reader, 0, end, b"moov")? else {
+        return Ok(None);
+    };
+    let udta = find_atom(reader, moov.body_start, moov.end, b"udta")?;
+    Ok(udta.map(|atom| atom.name_position))
+}
+
+struct AtomBounds {
+    name_position: u64,
+    body_start: u64,
+    end: u64,
+}
+
+/// The first atom called `name` between `start` and `end`.
+fn find_atom<R: Read + Seek>(
+    reader: &mut R,
+    start: u64,
+    end: u64,
+    name: &[u8; 4],
+) -> std::io::Result<Option<AtomBounds>> {
+    let mut position = start;
+    while position + 8 <= end {
+        reader.seek(SeekFrom::Start(position))?;
+        let mut header = [0u8; 8];
+        reader.read_exact(&mut header)?;
+
+        let mut len = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as u64;
+        let mut header_len = 8;
+        if len == 1 {
+            let mut long_len = [0u8; 8];
+            reader.read_exact(&mut long_len)?;
+            len = u64::from_be_bytes(long_len);
+            header_len = 16;
+        } else if len == 0 {
+            len = end - position;
+        }
+        if len < header_len || position + len > end {
+            return Ok(None);
+        }
+
+        if &header[4..8] == name {
+            return Ok(Some(AtomBounds {
+                name_position: position + 4,
+                body_start: position + header_len,
+                end: position + len,
+            }));
+        }
+        position += len;
+    }
+    Ok(None)
+}
 
 pub struct SymphoniaSource {
     decoder: Box<dyn SymphDecoder>,
@@ -62,12 +169,22 @@ impl SymphoniaSource {
         {
             Ok(probed) => probed.format,
             Err(probe_err) => {
-                // Fallback for RIFF-wrapped MP3 files (RMP3 / WAVE_FORMAT_MPEGLAYER3 0x0055)
-                let file2 = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
-                let mss2 = MediaSourceStream::new(Box::new(file2), Default::default());
-                match symphonia::default::formats::MpaReader::try_new(mss2, &format_opts) {
-                    Ok(mpa) => Box::new(mpa),
-                    Err(_) => return Err(format!("Failed to probe format: {}", probe_err)),
+                let without_user_data = Mp4WithoutUserData::open(path).and_then(|source| {
+                    let mss = MediaSourceStream::new(Box::new(source), Default::default());
+                    symphonia::default::get_probe()
+                        .format(&hint, mss, &format_opts, &metadata_opts)
+                        .ok()
+                });
+                if let Some(probed) = without_user_data {
+                    probed.format
+                } else {
+                    // Fallback for RIFF-wrapped MP3 files (RMP3 / WAVE_FORMAT_MPEGLAYER3 0x0055)
+                    let file2 = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
+                    let mss2 = MediaSourceStream::new(Box::new(file2), Default::default());
+                    match symphonia::default::formats::MpaReader::try_new(mss2, &format_opts) {
+                        Ok(mpa) => Box::new(mpa),
+                        Err(_) => return Err(format!("Failed to probe format: {}", probe_err)),
+                    }
                 }
             }
         };
@@ -544,12 +661,101 @@ mod tests {
     use super::*;
     use crate::test_audio::{aiff_bytes, pcm_samples, wav_bytes};
     use std::fs;
+    use std::io::Cursor;
 
     fn decoded_sample_count(file_name: &str, bytes: &[u8]) -> usize {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(file_name);
         fs::write(&path, bytes).unwrap();
         SymphoniaSource::from_path(&path).unwrap().count()
+    }
+
+    fn atom(name: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut bytes = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        bytes.extend_from_slice(name);
+        bytes.extend_from_slice(body);
+        bytes
+    }
+
+    fn mp4_bytes() -> Vec<u8> {
+        let moov_body = [atom(b"mvhd", &[1; 20]), atom(b"udta", &[2; 30])].concat();
+        [atom(b"ftyp", b"M4A "), atom(b"moov", &moov_body), atom(b"mdat", &[3; 40])].concat()
+    }
+
+    #[test]
+    fn finds_the_user_data_atom() {
+        let bytes = mp4_bytes();
+        let position = find_user_data_atom(&mut Cursor::new(&bytes)).unwrap().unwrap() as usize;
+        assert_eq!(&bytes[position..position + 4], b"udta");
+    }
+
+    #[test]
+    fn finds_the_user_data_atom_after_a_64_bit_atom() {
+        let mut long = 1u32.to_be_bytes().to_vec();
+        long.extend_from_slice(b"mdat");
+        long.extend_from_slice(&26u64.to_be_bytes());
+        long.extend_from_slice(&[3; 10]);
+        let bytes = [long, atom(b"moov", &atom(b"udta", &[2; 4]))].concat();
+
+        let position = find_user_data_atom(&mut Cursor::new(&bytes)).unwrap().unwrap() as usize;
+        assert_eq!(&bytes[position..position + 4], b"udta");
+    }
+
+    #[test]
+    fn finds_the_name_of_a_user_data_atom_with_a_64_bit_length() {
+        let mut udta = 1u32.to_be_bytes().to_vec();
+        udta.extend_from_slice(b"udta");
+        udta.extend_from_slice(&20u64.to_be_bytes());
+        udta.extend_from_slice(&[2; 4]);
+        let bytes = atom(b"moov", &udta);
+
+        let position = find_user_data_atom(&mut Cursor::new(&bytes)).unwrap().unwrap() as usize;
+        assert_eq!(&bytes[position..position + 4], b"udta");
+    }
+
+    #[test]
+    fn files_without_the_atom_or_with_broken_lengths_are_left_alone() {
+        for bytes in [
+            wav_bytes(),
+            atom(b"moov", &atom(b"mvhd", &[1; 8])),
+            [0, 0, 0, 3, b'm', b'o', b'o', b'v'].to_vec(),
+            [0xFF, 0xFF, 0xFF, 0xFF, b'm', b'o', b'o', b'v'].to_vec(),
+            Vec::new(),
+        ] {
+            assert_eq!(find_user_data_atom(&mut Cursor::new(&bytes)).unwrap(), None);
+        }
+    }
+
+    #[test]
+    fn the_atom_reads_as_free_however_the_reads_are_split_and_the_file_is_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.m4a");
+        let original = mp4_bytes();
+        fs::write(&path, &original).unwrap();
+        let name = find_user_data_atom(&mut Cursor::new(&original)).unwrap().unwrap() as usize;
+        let mut expected = original.clone();
+        expected[name..name + 4].copy_from_slice(b"free");
+
+        for chunk in [1, 2, 3, 7, 1000] {
+            let mut source = Mp4WithoutUserData::open(&path).unwrap();
+            let mut seen = Vec::new();
+            let mut buf = vec![0; chunk];
+            loop {
+                let read = source.read(&mut buf).unwrap();
+                if read == 0 {
+                    break;
+                }
+                seen.extend_from_slice(&buf[..read]);
+            }
+            assert_eq!(seen, expected, "chunk {chunk}");
+        }
+
+        let mut source = Mp4WithoutUserData::open(&path).unwrap();
+        source.seek(SeekFrom::Start(name as u64 + 2)).unwrap();
+        let mut rest = [0; 2];
+        source.read_exact(&mut rest).unwrap();
+        assert_eq!(&rest, b"ee");
+        assert_eq!(fs::read(&path).unwrap(), original);
     }
 
     #[test]

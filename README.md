@@ -20,7 +20,7 @@ CUI/TUI ファイラー `tuif`、および Windows ファイラー `guif` の No
 
 MP3 (`.mp3`)、FLAC (`.flac`)、AAC / ALAC (`.m4a`、`.aac`)、Ogg Vorbis (`.ogg`)、WAV (`.wav`)、AIFF (`.aif`、`.aiff`)
 
-Opus (`.opus`) には今後対応する予定です。WMA (`.wma`) は再生できません。
+Opus (`.opus`) には今後対応する予定です。WMA (`.wma`) と、DRM で保護された曲（iTunes Store の古い購入曲や Apple Music の曲など）は再生できません。
 
 ---
 

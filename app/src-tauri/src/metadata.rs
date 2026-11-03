@@ -31,7 +31,11 @@ pub fn is_supported_audio(path: &Path) -> bool {
     let is_temp_copy = path
         .file_stem()
         .is_some_and(|stem| stem.to_string_lossy().ends_with(TAG_TEMP_MARKER));
-    if is_temp_copy {
+    // macOS leaves "._name" files holding file attributes, not audio, on shared drives
+    let is_apple_double = path
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with("._"));
+    if is_temp_copy || is_apple_double {
         return false;
     }
 
@@ -985,7 +989,7 @@ mod tests {
 
     #[test]
     fn formats_without_a_decoder_are_not_listed() {
-        for name in ["a.opus", "a.wma", "a.alac", "a.txt", "mp3"] {
+        for name in ["a.opus", "a.wma", "a.alac", "a.txt", "mp3", "._a.mp3", "dir/._a.m4a"] {
             assert!(!is_supported_audio(Path::new(name)), "{name}");
         }
     }
