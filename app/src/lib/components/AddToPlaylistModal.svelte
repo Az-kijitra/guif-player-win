@@ -3,6 +3,15 @@
 
   let track = $derived(playerState.playlistModalTrack);
   let newName = $state("");
+  let cardEl = $state<HTMLDivElement | null>(null);
+
+  // Keyboard users start inside the dialog and return to the row that opened it
+  $effect(() => {
+    if (!cardEl) return;
+    const opener = document.activeElement as HTMLElement | null;
+    cardEl.querySelector<HTMLElement>(".playlist-option-btn, input")?.focus();
+    return () => opener?.focus();
+  });
 
   async function createAndAdd(e: SubmitEvent) {
     e.preventDefault();
@@ -32,8 +41,11 @@
       class="modal-card"
       role="document"
       tabindex="-1"
+      bind:this={cardEl}
       onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
+      onkeydown={(e) => {
+        if (e.key !== "Escape") e.stopPropagation();
+      }}
     >
       <div class="modal-header">
         <h3>プレイリストに追加</h3>

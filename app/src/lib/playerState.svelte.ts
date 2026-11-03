@@ -97,10 +97,10 @@ class PlayerStore {
       this.drives = await api.listDrives();
       const latestResume = await api.getLatestAlbumResume();
       const defaultPath = await api.getDefaultPath();
+      this.lastPlayedFilePath = latestResume?.last_file_path ?? null;
       await this.navigateTo(defaultPath);
 
       if (latestResume) {
-        this.lastPlayedFilePath = latestResume.last_file_path;
         const matchedItem = this.folderContent?.items.find(
           (i) => !i.is_directory && i.path === latestResume.last_file_path && i.track !== null
         );
@@ -338,6 +338,17 @@ class PlayerStore {
     }
     this.selectedTracks = merged;
     this.lastSelectedPath = targetTrack.file_path;
+  }
+
+  /** Shift + movement keys: `from` and `to` are null on rows that are not tracks. */
+  extendSelection(from: AudioTrack | null, to: AudioTrack | null, allTracks: AudioTrack[]) {
+    if (from && !this.isSelected(from.file_path)) {
+      this.toggleTrackSelection(from);
+    }
+    if (to) {
+      this.selectRange(to, allTracks);
+    }
+    this.showInspector = true;
   }
 
   selectAllTracks(allTracks: AudioTrack[]) {

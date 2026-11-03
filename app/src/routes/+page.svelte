@@ -8,6 +8,7 @@
   import PlayerDetailDialog from "$lib/components/PlayerDetailDialog.svelte";
   import PlaylistView from "$lib/components/PlaylistView.svelte";
   import PropertyInspector from "$lib/components/PropertyInspector.svelte";
+  import { focusActiveNavItem } from "$lib/listNavigation";
   import { playerState } from "$lib/playerState.svelte";
   import type { AudioTrack } from "$lib/types";
 
@@ -47,9 +48,24 @@
           playerState.selectAllTracks(playerState.playlistTracks);
           playerState.showInspector = true;
         }
-      } else if (e.key === " " && !isTextInput) {
+      } else if (e.key === " " && !e.ctrlKey && !isTextInput) {
         e.preventDefault();
         playerState.togglePlayPause();
+      } else if (
+        (e.key === "Backspace" || (e.altKey && e.key === "ArrowUp")) &&
+        playerState.viewMode === "FOLDER" &&
+        !isTextInput
+      ) {
+        e.preventDefault();
+        playerState.navigateUp();
+      } else if (
+        (e.key === "ArrowDown" || e.key === "ArrowUp") &&
+        activeEl === document.body &&
+        !playerState.showDetailDialog &&
+        !playerState.playlistModalTrack
+      ) {
+        e.preventDefault();
+        focusActiveNavItem();
       } else if (e.ctrlKey && e.key === "ArrowRight" && !isTextInput) {
         e.preventDefault();
         playerState.playNext();
@@ -76,6 +92,9 @@
           playerState.showDetailDialog = false;
         } else if (playerState.playlistModalTrack) {
           playerState.playlistModalTrack = null;
+        } else {
+          // Back to the list from the inspector or the header
+          focusActiveNavItem();
         }
       }
     }

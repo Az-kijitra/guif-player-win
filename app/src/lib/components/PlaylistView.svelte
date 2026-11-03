@@ -1,8 +1,139 @@
 <script lang="ts">
+  import { tick } from "svelte";
+  import {
+    focusNavItem,
+    hasCommandModifier,
+    nextListIndex,
+    visibleItemCount,
+  } from "../listNavigation";
   import { formatTime, playerState } from "../playerState.svelte";
-  import type { AudioTrack } from "../types";
+  import type { AudioTrack, Playlist } from "../types";
 
   let newPlaylistName = $state("");
+  let sidebarListEl = $state<HTMLDivElement | null>(null);
+  let tracksEl = $state<HTMLDivElement | null>(null);
+  let activePlaylistIndex = $state(0);
+  let activeTrackIndex = $state(0);
+  let activePlaylistRow = $derived(
+    Math.min(activePlaylistIndex, playerState.playlists.length - 1)
+  );
+  let activeTrackRow = $derived(
+    Math.min(activeTrackIndex, playerState.playlistTracks.length - 1)
+  );
+
+  // The list loads after the view opens, so wait for its rows
+  $effect(() => {
+    if (playerState.playlists.length > 0 && sidebarListEl) {
+      tick().then(() => {
+        if (document.activeElement === document.body) {
+          focusNavItem(sidebarListEl, activePlaylistRow);
+        }
+      });
+    }
+  });
+
+  function confirmDeletePlaylist(p: Playlist) {
+    return confirm(`プレイリスト「${p.name}」を削除しますか？`);
+  }
+
+  async function onPlaylistKeydown(e: KeyboardEvent, p: Playlist, index: number) {
+    if (e.key === "Enter") {
+      if (e.target !== e.currentTarget) return;
+      await playerState.selectPlaylist(p.id);
+      activeTrackIndex = 0;
+      await tick();
+      focusNavItem(tracksEl, 0);
+      return;
+    }
+    if (hasCommandModifier(e) || e.shiftKey) return;
+
+    if (e.key === "Delete") {
+      e.preventDefault();
+      if (confirmDeletePlaylist(p)) {
+        await playerState.deletePlaylist(p.id);
+        await tick();
+        focusNavItem(sidebarListEl, activePlaylistRow);
+      }
+      return;
+    }
+    if (e.key === "ArrowRight") {
+      if (playerState.activePlaylistId === p.id) {
+        e.preventDefault();
+        focusNavItem(tracksEl, activeTrackRow);
+      }
+      return;
+    }
+
+    const next = nextListIndex(e.key, index, playerState.playlists.length, {
+      pageSize: visibleItemCount(sidebarListEl),
+    });
+    if (next === null) return;
+    e.preventDefault();
+    activePlaylistIndex = next;
+    focusNavItem(sidebarListEl, next);
+  }
+
+  async function onTrackKeydown(e: KeyboardEvent, track: AudioTrack, index: number) {
+    const tracks = playerState.playlistTracks;
+    if (e.key === "Enter") {
+      if (e.target !== e.currentTarget) return;
+      playerState.selectSingleTrack(track);
+      playerState.playTrackInList(track, tracks);
+      return;
+    }
+
+    if (e.ctrlKey && e.key === " ") {
+      e.preventDefault();
+      playerState.toggleTrackSelection(track);
+      playerState.showInspector = true;
+      return;
+    }
+    if (hasCommandModifier(e)) return;
+
+    const letter = e.shiftKey ? "" : e.key.toLowerCase();
+    if (letter === "i") {
+      e.preventDefault();
+      if (!playerState.isSelected(track.file_path)) {
+        playerState.selectSingleTrack(track);
+      }
+      playerState.showInspector = true;
+      return;
+    }
+    if (letter === "p") {
+      e.preventDefault();
+      playerState.playlistModalTrack = track;
+      return;
+    }
+    if (e.key === "Delete" && !e.shiftKey) {
+      e.preventDefault();
+      await playerState.removeTrackFromPlaylist(
+        playerState.activePlaylistId!,
+        track.file_path
+      );
+      await tick();
+      focusNavItem(tracksEl, activeTrackRow);
+      if (playerState.playlistTracks.length === 0) {
+        focusNavItem(sidebarListEl, activePlaylistRow);
+      }
+      return;
+    }
+    if (e.key === "ArrowLeft" && !e.shiftKey) {
+      e.preventDefault();
+      focusNavItem(sidebarListEl, activePlaylistRow);
+      return;
+    }
+
+    const next = nextListIndex(e.key, index, tracks.length, {
+      pageSize: visibleItemCount(tracksEl),
+    });
+    if (next === null) return;
+    e.preventDefault();
+    if (e.shiftKey) {
+      playerState.extendSelection(track, tracks[next], tracks);
+    }
+    activeTrackIndex = next;
+    focusNavItem(tracksEl, next);
+  }
 
   async function handleCreatePlaylist(e: SubmitEvent) {
     e.preventDefault();
@@ -46,27 +177,28 @@
       <button type="submit" class="create-btn" title="作成">+</button>
     </form>
 
-    <div class="playlist-list">
-      {#each playerState.playlists as p}
+    <div class="playlist-list" bind:this={sidebarListEl}>
+      {#each playerState.playlists as p, index}
         {@const isSelected = playerState.activePlaylistId === p.id}
         <div
           class="playlist-item"
           class:selected={isSelected}
           role="button"
-          tabindex="0"
+          data-nav-item
+          tabindex={index === activePlaylistRow ? 0 : -1}
           onclick={() => playerState.selectPlaylist(p.id)}
-          onkeydown={(e) => {
-            if (e.key === "Enter") playerState.selectPlaylist(p.id);
-          }}
+          onfocus={() => (activePlaylistIndex = index)}
+          onkeydown={(e) => onPlaylistKeydown(e, p, index)}
         >
           <span class="item-name">{p.name}</span>
           <span class="item-count">{p.track_count}曲</span>
           <button
             class="delete-btn"
-            title="プレイリストを削除"
+            tabindex="-1"
+            title="プレイリストを削除 (Delete)"
             onclick={(e) => {
               e.stopPropagation();
-              if (confirm(`プレイリスト「${p.name}」を削除しますか？`)) {
+              if (confirmDeletePlaylist(p)) {
                 playerState.deletePlaylist(p.id);
               }
             }}
@@ -144,7 +276,7 @@
             <span class="col-del">削除</span>
           </div>
 
-          <div class="table-body">
+          <div class="table-body" bind:this={tracksEl}>
             {#each playerState.playlistTracks as track, idx}
               {@const isPlaying =
                 playerState.playback.current_track?.file_path === track.file_path}
@@ -154,19 +286,18 @@
                 class:is-playing={isPlaying}
                 class:is-selected={isSelected}
                 role="button"
-                tabindex="0"
+                data-nav-item
+                tabindex={idx === activeTrackRow ? 0 : -1}
                 onclick={(e) => onTrackClick(e, track)}
-                onkeydown={(e) => {
-                  if (e.key === "Enter") {
-                    playerState.selectSingleTrack(track);
-                    playerState.playTrackInList(track, playerState.playlistTracks);
-                  }
-                }}
+                onfocus={() => (activeTrackIndex = idx)}
+                onkeydown={(e) => onTrackKeydown(e, track, idx)}
               >
                 <span class="col-check">
                   <input
                     type="checkbox"
                     checked={isSelected}
+                    tabindex="-1"
+                    title="選択 (Ctrl+Space)"
                     onclick={(e) => {
                       e.stopPropagation();
                       if (e.shiftKey) {
@@ -186,7 +317,8 @@
                 <span class="col-del">
                   <button
                     class="del-track-btn"
-                    title="このプレイリストから削除"
+                    tabindex="-1"
+                    title="このプレイリストから削除 (Delete)"
                     onclick={(e) => {
                       e.stopPropagation();
                       playerState.removeTrackFromPlaylist(

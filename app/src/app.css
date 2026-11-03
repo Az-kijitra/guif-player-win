@@ -196,6 +196,12 @@ button:focus-visible {
   outline: 1px solid var(--ui-accent);
 }
 
+/* The components turn the outline off on their rows; keyboard users still need to see them */
+:root [data-nav-item]:focus-visible {
+  outline: 1px solid var(--ui-accent);
+  outline-offset: -1px;
+}
+
 input {
   font-family: inherit;
   font-size: inherit;
