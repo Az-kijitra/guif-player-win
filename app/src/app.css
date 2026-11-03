@@ -1,0 +1,230 @@
+:root,
+:root[data-theme="nord"] {
+  /* Nord Theme Palette (guif default preset) */
+  color-scheme: dark;
+
+  --nord0: #2e3440;
+  --nord1: #3b4252;
+  --nord2: #434c5e;
+  --nord3: #4c566a;
+
+  --nord4: #d8dee9;
+  --nord5: #e5e9f0;
+  --nord6: #eceff4;
+
+  --nord7: #8fbcbb;
+  --nord8: #88c0d0;
+  --nord9: #81a1c1;
+  --nord10: #5e81ac;
+
+  --nord11: #bf616a;
+  --nord12: #d08770;
+  --nord13: #ebcb8b;
+  --nord14: #a3be8c;
+  --nord15: #b48ead;
+
+  /* UI Aliases */
+  --ui-bg: var(--nord0);
+  --ui-panel-bg: var(--nord1);
+  --ui-hover-bg: var(--nord2);
+  --ui-border: var(--nord3);
+  --ui-fg: var(--nord4);
+  --ui-fg-bright: var(--nord6);
+  --ui-accent: var(--nord8);
+  --ui-accent-blue: var(--nord9);
+  --ui-progress: var(--nord13);
+  --ui-success: var(--nord14);
+
+  --ui-font: "JetBrains Mono", "JetBrainsMono NFM", "Cascadia Mono", "Consolas", "BIZ UDGothic", monospace;
+  --ui-font-size: 13px;
+  --ui-line-height: 18px;
+}
+
+:root[data-theme="default"] {
+  /* guif Preset::Default (ANSI / OneDark aligned) */
+  color-scheme: dark;
+
+  --nord0: #1e222a;
+  --nord1: #282c34;
+  --nord2: #353b45;
+  --nord3: #5a6374;
+
+  --nord4: #dcdfe4;
+  --nord5: #e6e9ef;
+  --nord6: #ffffff;
+
+  --nord7: #56b6c2;
+  --nord8: #56b6c2;
+  --nord9: #e5c07b;
+  --nord10: #61afef;
+
+  --nord11: #e06c75;
+  --nord12: #d19a66;
+  --nord13: #61afef;
+  --nord14: #98c379;
+  --nord15: #c678dd;
+}
+
+:root[data-theme="monokai"] {
+  /* guif Preset::Monokai */
+  color-scheme: dark;
+
+  --nord0: #272822;
+  --nord1: #3e3d32;
+  --nord2: #49483e;
+  --nord3: #75715e;
+
+  --nord4: #cfcfc2;
+  --nord5: #f8f8f2;
+  --nord6: #f8f8f2;
+
+  --nord7: #a6e22e;
+  --nord8: #f92672;
+  --nord9: #fd971f;
+  --nord10: #66d9ef;
+
+  --nord11: #f92672;
+  --nord12: #fd971f;
+  --nord13: #e6db74;
+  --nord14: #a6e22e;
+  --nord15: #ae81ff;
+}
+
+:root[data-theme="catppuccin"] {
+  /* guif Preset::Catppuccin (Catppuccin Mocha) */
+  color-scheme: dark;
+
+  --nord0: #1e1e2e;
+  --nord1: #313244;
+  --nord2: #45475a;
+  --nord3: #585b70;
+
+  --nord4: #bac2de;
+  --nord5: #cdd6f4;
+  --nord6: #cdd6f4;
+
+  --nord7: #89b4fa;
+  --nord8: #cba6f7;
+  --nord9: #f9e2af;
+  --nord10: #89dceb;
+
+  --nord11: #f38ba8;
+  --nord12: #fab387;
+  --nord13: #fab387;
+  --nord14: #a6e3a1;
+  --nord15: #f5c2e7;
+}
+
+:root[data-theme="solarized"] {
+  /* guif Preset::Solarized (Solarized Dark) */
+  color-scheme: dark;
+
+  --nord0: #002b36;
+  --nord1: #073642;
+  --nord2: #0d4654;
+  --nord3: #586e75;
+
+  --nord4: #839496;
+  --nord5: #93a1a1;
+  --nord6: #eee8d5;
+
+  --nord7: #2aa198;
+  --nord8: #268bd2;
+  --nord9: #b58900;
+  --nord10: #268bd2;
+
+  --nord11: #dc322f;
+  --nord12: #cb4b16;
+  --nord13: #cb4b16;
+  --nord14: #859900;
+  --nord15: #d33682;
+}
+
+:root[data-theme="light"] {
+  /* guif Preset::Light */
+  color-scheme: light;
+
+  --nord0: #f5f5f5;
+  --nord1: #e5e7eb;
+  --nord2: #d1d5db;
+  --nord3: #6b7280;
+
+  --nord4: #374151;
+  --nord5: #1f2937;
+  --nord6: #111827;
+
+  --nord7: #0078d7;
+  --nord8: #0066cc;
+  --nord9: #d97706;
+  --nord10: #0066cc;
+
+  --nord11: #dc2626;
+  --nord12: #ea580c;
+  --nord13: #ea580c;
+  --nord14: #16a34a;
+  --nord15: #7c3aed;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--ui-bg);
+  color: var(--ui-fg);
+  font-family: var(--ui-font);
+  font-size: var(--ui-font-size);
+  line-height: var(--ui-line-height);
+  user-select: none;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  color: inherit;
+}
+
+button:focus-visible {
+  outline: 1px solid var(--ui-accent);
+}
+
+input {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: var(--nord1);
+  border: 1px solid var(--nord3);
+  padding: 4px 8px;
+}
+
+input:focus {
+  outline: 1px solid var(--ui-accent);
+  border-color: var(--ui-accent);
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--nord0);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--nord3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--nord8);
+}
