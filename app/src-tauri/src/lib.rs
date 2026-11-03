@@ -2,6 +2,7 @@ pub mod db;
 pub mod metadata;
 pub mod models;
 pub mod player;
+pub mod queue;
 pub mod scanner;
 
 use std::path::Path;
@@ -15,6 +16,7 @@ use crate::models::{
     TagUpdateRequest, TrackResume,
 };
 use crate::player::{AudioPlayer, SharedPlayer};
+use crate::queue::REPEAT_ONE;
 
 pub struct AppState {
     pub player: SharedPlayer,
@@ -137,10 +139,11 @@ fn play_queue(
 }
 
 #[tauri::command]
-fn toggle_play_pause(state: State<'_, AppState>) {
+fn toggle_play_pause(state: State<'_, AppState>) -> Result<(), String> {
     let mut player = state.player.lock().unwrap();
-    player.toggle_play_pause();
+    player.toggle_play_pause()?;
     record_current_track_resume(&player, &state.db);
+    Ok(())
 }
 
 #[tauri::command]
@@ -486,10 +489,7 @@ pub fn run() {
 
                 // Check track end
                 if p.check_track_end() {
-                    if state_dto.repeat_mode == 1 {
-                        // Repeat single track
-                        p.seek(0);
-                    } else {
+                    if state_dto.repeat_mode != REPEAT_ONE {
                         // Mark current completed in DB
                         if let Some(cur) = &state_dto.current_track {
                             if let Some(parent) = Path::new(&cur.file_path).parent() {
@@ -502,9 +502,11 @@ pub fn run() {
                                 );
                             }
                         }
-                        let _ = p.play_next();
-                        record_current_track_resume(&p, &thread_db);
                     }
+                    if let Err(e) = p.handle_track_end() {
+                        eprintln!("Failed to play the next track: {}", e);
+                    }
+                    record_current_track_resume(&p, &thread_db);
                     let new_state = p.get_state_dto();
                     let _ = app_handle.emit("playback-state-changed", new_state);
                 } else if state_dto.is_playing {

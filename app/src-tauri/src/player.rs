@@ -12,6 +12,7 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use symphonia::core::units::{Duration as SymphDuration, Time};
 use crate::models::{AudioTrack, PlaybackStateDto};
+use crate::queue::{PlayQueue, REPEAT_ONE};
 
 const MAX_DECODE_RETRIES: usize = 64;
 
@@ -229,15 +230,12 @@ pub struct AudioPlayer {
     stream_handle: Option<OutputStreamHandle>,
     sink: Option<Sink>,
     current_track: Option<AudioTrack>,
-    queue: Vec<AudioTrack>,
-    queue_index: usize,
+    queue: PlayQueue,
     is_playing: bool,
     is_paused: bool,
     start_time: Option<Instant>,
     elapsed_before_pause: Duration,
     volume: f32,
-    shuffle_mode: bool,
-    repeat_mode: u8, // 0 = off, 1 = one, 2 = all
 }
 
 pub type SharedPlayer = Arc<Mutex<AudioPlayer>>;
@@ -256,20 +254,21 @@ impl AudioPlayer {
             }
         };
 
-        Arc::new(Mutex::new(Self {
+        Arc::new(Mutex::new(Self::with_output(stream_handle)))
+    }
+
+    fn with_output(stream_handle: Option<OutputStreamHandle>) -> Self {
+        Self {
             stream_handle,
             sink: None,
             current_track: None,
-            queue: Vec::new(),
-            queue_index: 0,
+            queue: PlayQueue::default(),
             is_playing: false,
             is_paused: false,
             start_time: None,
             elapsed_before_pause: Duration::ZERO,
             volume: 1.0,
-            shuffle_mode: false,
-            repeat_mode: 0,
-        }))
+        }
     }
 
     pub fn play_track(&mut self, mut track: AudioTrack, initial_position_ms: u64) -> Result<(), String> {
@@ -318,13 +317,20 @@ impl AudioPlayer {
     ) -> Result<(), String> {
         if let Some(track) = queue.get(start_index).cloned() {
             self.play_track(track, initial_pos_ms)?;
-            self.queue = queue;
-            self.queue_index = start_index;
+            self.queue.set_tracks(queue, start_index);
         }
         Ok(())
     }
 
-    pub fn toggle_play_pause(&mut self) {
+    pub fn toggle_play_pause(&mut self) -> Result<(), String> {
+        if self.sink.is_none() && !self.is_paused {
+            // Playback has finished: start the last track again
+            if let Some(track) = self.current_track.clone() {
+                self.play_track(track, 0)?;
+            }
+            return Ok(());
+        }
+
         if let Some(sink) = &self.sink {
             if self.is_paused {
                 sink.play();
@@ -341,6 +347,7 @@ impl AudioPlayer {
                 self.is_playing = false;
             }
         }
+        Ok(())
     }
 
     pub fn pause(&mut self) {
@@ -389,29 +396,14 @@ impl AudioPlayer {
     }
 
     pub fn play_next(&mut self) -> Result<(), String> {
-        if self.queue.is_empty() {
-            return Ok(());
-        }
-
-        if self.shuffle_mode {
-            let rng_val = Instant::now().elapsed().subsec_nanos() as usize;
-            self.queue_index = rng_val % self.queue.len();
-        } else if self.queue_index + 1 < self.queue.len() {
-            self.queue_index += 1;
-        } else if self.repeat_mode == 2 {
-            self.queue_index = 0;
-        } else {
-            return Ok(());
-        }
-
-        if let Some(track) = self.queue.get(self.queue_index).cloned() {
+        if let Some(track) = self.queue.advance().cloned() {
             self.play_track(track, 0)?;
         }
         Ok(())
     }
 
     pub fn play_previous(&mut self) -> Result<(), String> {
-        if self.queue.is_empty() {
+        if self.queue.tracks().is_empty() {
             return Ok(());
         }
 
@@ -421,24 +413,47 @@ impl AudioPlayer {
             return Ok(());
         }
 
-        if self.queue_index > 0 {
-            self.queue_index -= 1;
-        } else if self.repeat_mode == 2 {
-            self.queue_index = self.queue.len().saturating_sub(1);
-        }
-
-        if let Some(track) = self.queue.get(self.queue_index).cloned() {
+        if let Some(track) = self.queue.previous().cloned() {
             self.play_track(track, 0)?;
         }
         Ok(())
     }
 
+    /// Decides what plays after the current track has run out.
+    pub fn handle_track_end(&mut self) -> Result<(), String> {
+        let next_track = if self.queue.repeat_mode() == REPEAT_ONE {
+            self.current_track.clone()
+        } else {
+            self.queue.advance().cloned()
+        };
+
+        let Some(track) = next_track else {
+            self.finish_playback();
+            return Ok(());
+        };
+
+        let result = self.play_track(track, 0);
+        if result.is_err() && self.queue.repeat_mode() == REPEAT_ONE {
+            // The same file would fail again on every tick
+            self.finish_playback();
+        }
+        result
+    }
+
+    fn finish_playback(&mut self) {
+        self.sink = None;
+        self.is_playing = false;
+        self.is_paused = false;
+        self.start_time = None;
+        self.elapsed_before_pause = Duration::ZERO;
+    }
+
     pub fn toggle_shuffle(&mut self) {
-        self.shuffle_mode = !self.shuffle_mode;
+        self.queue.toggle_shuffle();
     }
 
     pub fn toggle_repeat(&mut self) {
-        self.repeat_mode = (self.repeat_mode + 1) % 3;
+        self.queue.toggle_repeat();
     }
 
     pub fn get_position_ms(&self) -> u64 {
@@ -469,9 +484,9 @@ impl AudioPlayer {
             position_ms: pos_ms,
             duration_ms,
             volume: self.volume,
-            shuffle_mode: self.shuffle_mode,
-            repeat_mode: self.repeat_mode,
-            queue: self.queue.clone(),
+            shuffle_mode: self.queue.shuffle(),
+            repeat_mode: self.queue.repeat_mode(),
+            queue: self.queue.tracks().to_vec(),
         }
     }
 
@@ -500,11 +515,7 @@ impl AudioPlayer {
         suspended: Option<(AudioTrack, u64, bool)>,
     ) {
         // Update queue metadata
-        for q_item in &mut self.queue {
-            if let Some(updated) = updated_tracks.iter().find(|u| u.file_path == q_item.file_path) {
-                *q_item = updated.clone();
-            }
-        }
+        self.queue.update_tracks(updated_tracks);
 
         // Update current_track metadata
         if let Some(ref mut cur) = self.current_track {
@@ -525,5 +536,143 @@ impl AudioPlayer {
                 self.pause();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn pcm_samples() -> Vec<i16> {
+        (0..4410).map(|i| ((i % 100) * 100) as i16).collect()
+    }
+
+    fn wav_bytes() -> Vec<u8> {
+        let data: Vec<u8> = pcm_samples().iter().flat_map(|s| s.to_le_bytes()).collect();
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        bytes.extend_from_slice(&1u16.to_le_bytes()); // mono
+        bytes.extend_from_slice(&44100u32.to_le_bytes());
+        bytes.extend_from_slice(&88200u32.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&data);
+        bytes
+    }
+
+    fn aiff_bytes() -> Vec<u8> {
+        let samples = pcm_samples();
+        let data: Vec<u8> = samples.iter().flat_map(|s| s.to_be_bytes()).collect();
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"FORM");
+        bytes.extend_from_slice(&(4 + 26 + 16 + data.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(b"AIFFCOMM");
+        bytes.extend_from_slice(&18u32.to_be_bytes());
+        bytes.extend_from_slice(&1u16.to_be_bytes()); // mono
+        bytes.extend_from_slice(&(samples.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(&16u16.to_be_bytes());
+        // 44100 as an 80-bit extended float
+        bytes.extend_from_slice(&[0x40, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0]);
+        bytes.extend_from_slice(b"SSND");
+        bytes.extend_from_slice(&(8 + data.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(&[0; 8]); // offset and block size
+        bytes.extend_from_slice(&data);
+        bytes
+    }
+
+    fn decoded_sample_count(file_name: &str, bytes: &[u8]) -> usize {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(file_name);
+        fs::write(&path, bytes).unwrap();
+        SymphoniaSource::from_path(&path).unwrap().count()
+    }
+
+    #[test]
+    fn decodes_wav() {
+        assert_eq!(decoded_sample_count("a.wav", &wav_bytes()), pcm_samples().len());
+    }
+
+    #[test]
+    fn decodes_aiff() {
+        assert_eq!(decoded_sample_count("a.aiff", &aiff_bytes()), pcm_samples().len());
+    }
+
+    fn track(file_path: &str) -> AudioTrack {
+        AudioTrack {
+            file_path: file_path.to_string(),
+            file_name: file_path.to_string(),
+            title: file_path.to_string(),
+            artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            duration_ms: 1000,
+            track_number: None,
+            has_artwork: false,
+        }
+    }
+
+    /// A player whose track has just run out: no audio device is needed.
+    fn player_at_track_end(queue_len: usize) -> AudioPlayer {
+        let mut player = AudioPlayer::with_output(None);
+        let tracks: Vec<_> = (0..queue_len).map(|n| track(&format!("{n}.mp3"))).collect();
+        player.current_track = tracks.first().cloned();
+        player.queue.set_tracks(tracks, 0);
+        let (sink, _queue) = Sink::new_idle();
+        player.sink = Some(sink);
+        player.is_playing = true;
+        player.start_time = Some(Instant::now());
+        player
+    }
+
+    #[test]
+    fn last_track_ending_stops_playback_once() {
+        let mut player = player_at_track_end(1);
+        assert!(player.check_track_end());
+
+        player.handle_track_end().unwrap();
+
+        assert!(!player.check_track_end());
+        let state = player.get_state_dto();
+        assert!(!state.is_playing);
+        assert_eq!(state.position_ms, 0);
+        assert_eq!(state.current_track.unwrap().file_path, "0.mp3");
+    }
+
+    #[test]
+    fn repeat_one_stops_when_the_track_cannot_be_played_again() {
+        let mut player = player_at_track_end(2);
+        player.toggle_repeat();
+
+        assert!(player.handle_track_end().is_err());
+
+        assert!(!player.check_track_end());
+        assert!(!player.get_state_dto().is_playing);
+    }
+
+    #[test]
+    fn a_track_that_cannot_be_played_leaves_the_rest_of_the_queue_to_try() {
+        let mut player = player_at_track_end(2);
+
+        assert!(player.handle_track_end().is_err());
+
+        // The next tick moves on and finds the end of the queue
+        assert!(player.check_track_end());
+        player.handle_track_end().unwrap();
+        assert!(!player.check_track_end());
+    }
+
+    #[test]
+    fn toggling_after_the_end_plays_the_last_track_again() {
+        let mut player = player_at_track_end(1);
+        player.handle_track_end().unwrap();
+
+        // No output device here, so starting again reports that instead of doing nothing
+        assert!(player.toggle_play_pause().is_err());
     }
 }
