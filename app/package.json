@@ -1,7 +1,7 @@
 {
   "name": "guif-player-win",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "A keyboard-driven modern Windows audio player built with Tauri 2, Rust, and Svelte 5.",
   "license": "MIT",
