@@ -1,27 +1,42 @@
 {
   "name": "guif-player-win",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "description": "A keyboard-driven modern Windows audio player built with Tauri 2, Rust, and Svelte 5.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Az-kijitra/guif-player-win.git"
+  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
     "prepare": "svelte-kit sync || echo \"\"",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "notices": "node scripts/third-party-notices.mjs",
+    "check": "svelte-check",
+    "check:docs": "node scripts/check-docs.mjs",
+    "release:check": "node scripts/release/versions.mjs",
+    "release:build": "node scripts/release/build.mjs",
+    "release:sandbox": "node --no-warnings scripts/release/sandbox/run-sandbox-test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.2.0"
   },
   "devDependencies": {
-    "@sveltejs/adapter-static": "^3.0.8",
-    "@sveltejs/kit": "^2.16.0",
-    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@sveltejs/adapter-static": "^4.0.1",
+    "@sveltejs/kit": "^3.1.1",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tauri-apps/cli": "^2.2.0",
     "@types/node": "^22.10.1",
     "svelte": "^5.19.0",
-    "typescript": "^5.7.0",
-    "vite": "^6.0.0"
+    "svelte-check": "4.7.7",
+    "typescript": "^6.0.0",
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
   }
 }

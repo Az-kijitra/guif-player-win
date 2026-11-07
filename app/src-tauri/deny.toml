@@ -1,0 +1,35 @@
+# Checked by cargo-deny in CI (.github/workflows/ci.yml).
+
+[graph]
+# The app ships for Windows only
+targets = ["x86_64-pc-windows-msvc"]
+
+[advisories]
+yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained, not vulnerable: a compile-time macro used by lofty, which we keep up to date" },
+]
+
+[licenses]
+confidence-threshold = 0.9
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

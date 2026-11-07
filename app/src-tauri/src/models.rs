@@ -47,7 +47,8 @@ pub struct PlaybackStateDto {
     pub volume: f32,
     pub shuffle_mode: bool,
     pub repeat_mode: u8, // 0 = off, 1 = one, 2 = all
-    pub queue: Vec<AudioTrack>,
+    // This goes out several times a second, so it carries a version instead of the queue itself
+    pub queue_version: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,3 +91,14 @@ pub struct TagUpdateRequest {
     pub clear_artwork: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagUpdateFailure {
+    pub file_path: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagUpdateResult {
+    pub updated: Vec<AudioTrack>,
+    pub failed: Vec<TagUpdateFailure>,
+}

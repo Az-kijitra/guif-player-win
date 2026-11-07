@@ -1,11 +1,48 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { tick } from "svelte";
   import { api } from "../api";
+  import {
+    focusNavItem,
+    hasCommandModifier,
+    nextListIndex,
+    visibleItemCount,
+  } from "../listNavigation";
   import { playerState } from "../playerState.svelte";
   import type { AlbumSummary } from "../types";
 
   let albums = $derived(playerState.albums);
   let artworkCache = $state<Record<string, string | null>>({});
+  let gridEl = $state<HTMLDivElement | null>(null);
+  let activeIndex = $state(0);
+  let activeCard = $derived(Math.min(activeIndex, albums.length - 1));
+
+  $effect(() => {
+    if (albums.length > 0 && gridEl) {
+      tick().then(() => {
+        if (document.activeElement === document.body) {
+          focusNavItem(gridEl, activeCard);
+        }
+      });
+    }
+  });
+
+  function onCardKeydown(e: KeyboardEvent, album: AlbumSummary, index: number) {
+    if (e.key === "Enter") {
+      onAlbumClick(album);
+      return;
+    }
+    if (hasCommandModifier(e) || e.shiftKey || !gridEl) return;
+
+    const columns = getComputedStyle(gridEl).gridTemplateColumns.split(" ").length;
+    const next = nextListIndex(e.key, index, albums.length, {
+      columns,
+      pageSize: columns * visibleItemCount(gridEl),
+    });
+    if (next === null) return;
+    e.preventDefault();
+    activeIndex = next;
+    focusNavItem(gridEl, next);
+  }
 
   async function loadArtworks(list: AlbumSummary[]) {
     for (const a of list) {
@@ -34,23 +71,25 @@
 </script>
 
 <div class="artwork-grid-view">
-  {#if albums.length === 0}
+  {#if albums.length === 0 && playerState.isLoadingAlbums}
+    <div class="empty-state">読み込み中…</div>
+  {:else if albums.length === 0}
     <div class="empty-state">
       このディレクトリ配下にはアルバムが見つかりませんでした。<br />
       上の [📁 フォルダ] から音楽フォルダを選択してください。
     </div>
   {:else}
-    <div class="grid">
-      {#each albums as album}
+    <div class="grid" bind:this={gridEl}>
+      {#each albums as album, index}
         {@const art = artworkCache[album.first_track_path]}
         <div
           class="album-card"
           role="button"
-          tabindex="0"
+          data-nav-item
+          tabindex={index === activeCard ? 0 : -1}
           onclick={() => onAlbumClick(album)}
-          onkeydown={(e) => {
-            if (e.key === "Enter") onAlbumClick(album);
-          }}
+          onfocus={() => (activeIndex = index)}
+          onkeydown={(e) => onCardKeydown(e, album, index)}
         >
           <div class="art-container">
             {#if art}
@@ -88,7 +127,7 @@
   .empty-state {
     padding: 60px 20px;
     text-align: center;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     line-height: 1.6;
   }
 

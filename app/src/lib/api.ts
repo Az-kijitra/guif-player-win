@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type {
   AlbumResume,
   AlbumSummary,
@@ -7,6 +8,7 @@ import type {
   PlaybackState,
   Playlist,
   TagUpdateRequest,
+  TagUpdateResult,
   TrackResume,
 } from "./types";
 
@@ -17,9 +19,11 @@ export const api = {
   listAlbums: (rootPath: string) => invoke<AlbumSummary[]>("list_albums", { rootPath }),
   getArtwork: (filePath: string) => invoke<string | null>("get_artwork", { filePath }),
   updateTracksMetadata: (request: TagUpdateRequest) =>
-    invoke<AudioTrack[]>("update_tracks_metadata", { request }),
+    invoke<TagUpdateResult>("update_tracks_metadata", { request }),
 
   // Playback
+  onPlaybackError: (handler: (message: string) => void) =>
+    listen<string>("playback-error", (event) => handler(event.payload)),
   playTrack: (track: AudioTrack, initialPosMs?: number) =>
     invoke<void>("play_track", { track, initialPosMs }),
   playQueue: (queue: AudioTrack[], startIndex: number, initialPosMs?: number) =>
@@ -34,6 +38,7 @@ export const api = {
   toggleShuffle: () => invoke<boolean>("toggle_shuffle"),
   toggleRepeat: () => invoke<number>("toggle_repeat"),
   getPlaybackState: () => invoke<PlaybackState>("get_playback_state"),
+  getQueue: () => invoke<AudioTrack[]>("get_queue"),
 
   // Resumes
   saveAlbumResume: (albumPath: string, lastFilePath: string, positionMs: number) =>

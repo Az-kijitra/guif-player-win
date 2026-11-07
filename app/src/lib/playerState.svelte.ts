@@ -6,6 +6,7 @@ import type {
   PlaybackState,
   Playlist,
   TagUpdateRequest,
+  TagUpdateResult,
   ThemePreset,
   ThemeSetting,
   TrackResume,
@@ -14,6 +15,8 @@ import type {
 
 const THEME_STORAGE_KEY = "guif_player_theme_setting";
 const RESOLVED_THEME_STORAGE_KEY = "guif_player_resolved_theme";
+
+const ERROR_DISPLAY_MS = 8000;
 
 const VALID_PRESETS: ThemePreset[] = [
   "nord",
@@ -85,22 +88,59 @@ class PlayerStore {
     volume: 1.0,
     shuffle_mode: false,
     repeat_mode: 0,
-    queue: [],
+    queue_version: 0,
   });
+  queue = $state<AudioTrack[]>([]);
+
+  isLoadingFolder = $state<boolean>(false);
+  isLoadingAlbums = $state<boolean>(false);
+  // Scans run in the background now, so an older answer can arrive after a newer request
+  private latestFolderRequest = 0;
+  private latestAlbumRequest = 0;
+
+  errorMessage = $state<string | null>(null);
+  private errorTimer: ReturnType<typeof setTimeout> | null = null;
 
   private syncInterval: number | null = null;
   private lastArtworkTrackPath: string | null = null;
 
+  showError(message: string) {
+    if (this.errorTimer) clearTimeout(this.errorTimer);
+    this.errorMessage = message;
+    this.errorTimer = setTimeout(() => this.clearError(), ERROR_DISPLAY_MS);
+  }
+
+  clearError() {
+    if (this.errorTimer) clearTimeout(this.errorTimer);
+    this.errorTimer = null;
+    this.errorMessage = null;
+  }
+
+  private reportError(context: string, e: unknown) {
+    console.error(`${context}:`, e);
+    this.showError(`${context}: ${e}`);
+  }
+
+  // The backend's playback messages are written for the screen
+  private async attempt(action: () => Promise<unknown>) {
+    try {
+      await action();
+    } catch (e) {
+      this.showError(String(e));
+    }
+  }
+
   async init() {
     try {
+      await api.onPlaybackError((message) => this.showError(message));
       await this.loadTheme();
       this.drives = await api.listDrives();
       const latestResume = await api.getLatestAlbumResume();
       const defaultPath = await api.getDefaultPath();
+      this.lastPlayedFilePath = latestResume?.last_file_path ?? null;
       await this.navigateTo(defaultPath);
 
       if (latestResume) {
-        this.lastPlayedFilePath = latestResume.last_file_path;
         const matchedItem = this.folderContent?.items.find(
           (i) => !i.is_directory && i.path === latestResume.last_file_path && i.track !== null
         );
@@ -115,16 +155,18 @@ class PlayerStore {
       // Poll playback state every 250ms
       this.startSync();
     } catch (e) {
-      console.error("Failed to initialize player state:", e);
+      this.reportError("起動時の読み込みに失敗しました", e);
     }
   }
 
   startSync() {
     if (this.syncInterval) clearInterval(this.syncInterval);
+    let polling = false;
     this.syncInterval = window.setInterval(async () => {
+      if (polling) return;
+      polling = true;
       try {
-        const state = await api.getPlaybackState();
-        this.playback = state;
+        const state = await this.refreshPlayback();
 
         if (state.current_track?.file_path !== this.lastArtworkTrackPath) {
           this.lastArtworkTrackPath = state.current_track?.file_path ?? null;
@@ -136,17 +178,38 @@ class PlayerStore {
         }
       } catch {
         // Ignored during shutdown or hot reload
+      } finally {
+        polling = false;
       }
     }, 250);
   }
 
+  private async refreshPlayback() {
+    const state = await api.getPlaybackState();
+    if (state.queue_version !== this.playback.queue_version) {
+      this.queue = await api.getQueue();
+    }
+    this.playback = state;
+    return state;
+  }
+
   async navigateTo(path: string) {
-    this.currentPath = path;
+    const request = ++this.latestFolderRequest;
+    this.isLoadingFolder = true;
     try {
-      this.folderContent = await api.listFolder(path);
+      const content = await api.listFolder(path);
+      if (request !== this.latestFolderRequest) return;
+      this.currentPath = path;
+      this.folderContent = content;
       await this.loadResumes();
     } catch (e) {
-      console.error("Failed to list folder:", e);
+      if (request === this.latestFolderRequest) {
+        this.reportError("フォルダーを開けません", e);
+      }
+    } finally {
+      if (request === this.latestFolderRequest) {
+        this.isLoadingFolder = false;
+      }
     }
   }
 
@@ -158,10 +221,21 @@ class PlayerStore {
 
   async loadAlbums() {
     if (!this.currentPath) return;
+    const request = ++this.latestAlbumRequest;
+    this.isLoadingAlbums = true;
     try {
-      this.albums = await api.listAlbums(this.currentPath);
+      const albums = await api.listAlbums(this.currentPath);
+      if (request === this.latestAlbumRequest) {
+        this.albums = albums;
+      }
     } catch (e) {
-      console.error("Failed to list albums:", e);
+      if (request === this.latestAlbumRequest) {
+        this.reportError("アルバムを読み込めません", e);
+      }
+    } finally {
+      if (request === this.latestAlbumRequest) {
+        this.isLoadingAlbums = false;
+      }
     }
   }
 
@@ -169,7 +243,7 @@ class PlayerStore {
     try {
       this.playlists = await api.getPlaylists();
     } catch (e) {
-      console.error("Failed to get playlists:", e);
+      this.reportError("プレイリストを読み込めません", e);
     }
   }
 
@@ -178,7 +252,7 @@ class PlayerStore {
     try {
       this.playlistTracks = await api.getPlaylistTracks(id);
     } catch (e) {
-      console.error("Failed to get playlist tracks:", e);
+      this.reportError("プレイリストの曲を読み込めません", e);
     }
   }
 
@@ -189,7 +263,7 @@ class PlayerStore {
       await this.loadPlaylists();
       await this.selectPlaylist(p.id);
     } catch (e) {
-      console.error("Failed to create playlist:", e);
+      this.reportError("プレイリストを作成できません", e);
     }
   }
 
@@ -202,7 +276,7 @@ class PlayerStore {
       }
       await this.loadPlaylists();
     } catch (e) {
-      console.error("Failed to delete playlist:", e);
+      this.reportError("プレイリストを削除できません", e);
     }
   }
 
@@ -215,7 +289,7 @@ class PlayerStore {
       }
       this.playlistModalTrack = null;
     } catch (e) {
-      console.error("Failed to add track to playlist:", e);
+      this.reportError("プレイリストに追加できません", e);
     }
   }
 
@@ -225,7 +299,7 @@ class PlayerStore {
       await this.loadPlaylists();
       await this.selectPlaylist(playlistId);
     } catch (e) {
-      console.error("Failed to remove track from playlist:", e);
+      this.reportError("プレイリストから外せません", e);
     }
   }
 
@@ -238,7 +312,7 @@ class PlayerStore {
       }
       this.trackResumes = map;
     } catch (e) {
-      console.error("Failed to load track resumes:", e);
+      this.reportError("再生位置を読み込めません", e);
     }
   }
 
@@ -249,26 +323,26 @@ class PlayerStore {
       const initialPos = resume && !resume.is_completed ? resume.position_ms : 0;
 
       await api.playQueue(trackList, Math.max(0, index), initialPos);
-      this.playback = await api.getPlaybackState();
+      await this.refreshPlayback();
     } catch (e) {
-      console.error("Failed to play track queue:", e);
+      this.showError(String(e));
     }
   }
 
   async togglePlayPause() {
-    await api.togglePlayPause();
+    await this.attempt(() => api.togglePlayPause());
   }
 
   async playNext() {
-    await api.playNext();
+    await this.attempt(() => api.playNext());
   }
 
   async playPrevious() {
-    await api.playPrevious();
+    await this.attempt(() => api.playPrevious());
   }
 
   async seek(posMs: number) {
-    await api.seek(posMs);
+    await this.attempt(() => api.seek(posMs));
   }
 
   async setVolume(vol: number) {
@@ -340,6 +414,17 @@ class PlayerStore {
     this.lastSelectedPath = targetTrack.file_path;
   }
 
+  /** Shift + movement keys: `from` and `to` are null on rows that are not tracks. */
+  extendSelection(from: AudioTrack | null, to: AudioTrack | null, allTracks: AudioTrack[]) {
+    if (from && !this.isSelected(from.file_path)) {
+      this.toggleTrackSelection(from);
+    }
+    if (to) {
+      this.selectRange(to, allTracks);
+    }
+    this.showInspector = true;
+  }
+
   selectAllTracks(allTracks: AudioTrack[]) {
     this.selectedTracks = [...allTracks];
     if (allTracks.length > 0) {
@@ -361,9 +446,11 @@ class PlayerStore {
     this.selectedTracks = copy;
   }
 
-  async updateTracksMetadata(request: TagUpdateRequest): Promise<AudioTrack[]> {
-    const updated = await api.updateTracksMetadata(request);
-    const updatedMap = new Map(updated.map((t) => [t.file_path, t]));
+  async updateTracksMetadata(request: TagUpdateRequest): Promise<TagUpdateResult> {
+    const result = await api.updateTracksMetadata(request);
+    // Nothing changed: leave the form as it is, so the user can retry
+    if (result.updated.length === 0) return result;
+    const updatedMap = new Map(result.updated.map((t) => [t.file_path, t]));
 
     // Update selectedTracks
     this.selectedTracks = this.selectedTracks.map(
@@ -392,7 +479,7 @@ class PlayerStore {
     }
     this.artworkVersion += 1;
 
-    return updated;
+    return result;
   }
 
   async loadTheme() {
@@ -413,7 +500,7 @@ class PlayerStore {
         localStorage.setItem(RESOLVED_THEME_STORAGE_KEY, resolved);
       }
     } catch (e) {
-      console.error("Failed to load theme setting:", e);
+      this.reportError("テーマを読み込めません", e);
     }
   }
 
@@ -431,7 +518,7 @@ class PlayerStore {
         localStorage.setItem(RESOLVED_THEME_STORAGE_KEY, resolved);
       }
     } catch (e) {
-      console.error("Failed to save theme setting:", e);
+      this.reportError("テーマを保存できません", e);
     }
   }
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "../api";
   import { formatTime, playerState } from "../playerState.svelte";
+  import { ARTWORK_IMAGE_TYPES, describeTagUpdate } from "../tagUpdateMessage";
   import type { AudioTrack, TagUpdateRequest } from "../types";
 
   let tracks = $derived(playerState.selectedTracks);
@@ -122,7 +123,13 @@
   }
 
   function handleImageFile(file: File) {
-    if (!file.type.startsWith("image/")) return;
+    if (!ARTWORK_IMAGE_TYPES.includes(file.type)) {
+      statusMessage = {
+        text: "対応していない画像形式です。JPEG、PNG、GIF を選んでください",
+        type: "error",
+      };
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") {
@@ -177,11 +184,8 @@
     };
 
     try {
-      const updated = await playerState.updateTracksMetadata(req);
-      statusMessage = {
-        text: `✓ ${updated.length}件のプロパティを保存しました`,
-        type: "success",
-      };
+      const result = await playerState.updateTracksMetadata(req);
+      statusMessage = describeTagUpdate(result);
       setTimeout(() => {
         if (statusMessage?.type === "success") {
           statusMessage = null;
@@ -299,7 +303,7 @@
 
           <input
             type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif"
+            accept={ARTWORK_IMAGE_TYPES.join(",")}
             bind:this={fileInputEl}
             onchange={onFileInputChange}
             style="display: none;"
@@ -750,7 +754,7 @@
     flex-direction: column;
     align-items: center;
     font-size: 10px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     text-align: center;
   }
 
@@ -767,7 +771,7 @@
   }
 
   .muted-note {
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .dirty-tag {
@@ -881,6 +885,8 @@
     background: color-mix(in srgb, var(--nord14) 20%, transparent);
     color: var(--nord14);
     border: 1px solid var(--nord14);
+    white-space: pre-line;
+    overflow-wrap: anywhere;
   }
 
   .status-banner.error {
@@ -946,7 +952,7 @@
   }
 
   .meta-key {
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     flex-shrink: 0;
   }
 
@@ -959,7 +965,7 @@
 
   .meta-val.path {
     font-size: 10px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .selected-list-section {

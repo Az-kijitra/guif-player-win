@@ -1,8 +1,11 @@
 [package]
 name = "guif-player"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "guif-player - Windows Audio Player"
+license = "MIT"
+repository = "https://github.com/Az-kijitra/guif-player-win"
+rust-version = "1.90"
 
 [lib]
 name = "guif_player_lib"
@@ -21,11 +24,15 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rodio = { version = "0.20", features = ["symphonia-all", "symphonia-alac", "symphonia-aiff"] }
 symphonia = { version = "0.5.4", features = ["all"] }
-lofty = "0.21"
+lofty = "0.25"
 rusqlite = { version = "0.32", features = ["bundled"] }
 walkdir = "2"
 base64 = "0.22"
 dirs = "6"
+fastrand = "2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging"] }
+
+[dev-dependencies]
+tempfile = "3"

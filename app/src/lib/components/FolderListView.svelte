@@ -1,4 +1,11 @@
 <script lang="ts">
+  import { tick, untrack } from "svelte";
+  import {
+    focusNavItem,
+    hasCommandModifier,
+    nextListIndex,
+    visibleItemCount,
+  } from "../listNavigation";
   import { formatTime, playerState } from "../playerState.svelte";
   import type { AudioTrack, FolderItem } from "../types";
 
@@ -16,6 +23,32 @@
 
   let didInitialScroll = $state(false);
   let tableBodyEl = $state<HTMLDivElement | null>(null);
+  let activeIndex = $state(0);
+  let activeRow = $derived(Math.min(activeIndex, items.length - 1));
+  let shownPath: string | null = null;
+
+  // A new folder: start on the folder we came from, otherwise on the last track used
+  $effect(() => {
+    const content = playerState.folderContent;
+    if (!content || content.current_path === shownPath) return;
+    const cameFrom = shownPath;
+    shownPath = content.current_path;
+
+    untrack(() => {
+      const wanted =
+        cameFrom ?? playerState.lastSelectedPath ?? playerState.lastPlayedFilePath;
+      activeIndex = Math.max(
+        0,
+        content.items.findIndex((i) => i.path === wanted)
+      );
+    });
+    tick().then(() => {
+      const focused = document.activeElement;
+      if (focused === document.body || tableBodyEl?.contains(focused)) {
+        focusNavItem(tableBodyEl, activeRow);
+      }
+    });
+  });
 
   $effect(() => {
     if (
@@ -65,6 +98,54 @@
     }
   }
 
+  function onRowKeydown(e: KeyboardEvent, item: FolderItem, index: number) {
+    if (e.key === "Enter") {
+      if (e.target !== e.currentTarget) return;
+      if (item.is_directory) playerState.navigateTo(item.path);
+      else if (item.track) {
+        playerState.selectSingleTrack(item.track);
+        playerState.playTrackInList(item.track, audioTracks);
+      }
+      return;
+    }
+
+    if (e.ctrlKey && e.key === " ") {
+      e.preventDefault();
+      if (item.track) {
+        playerState.toggleTrackSelection(item.track);
+        playerState.showInspector = true;
+      }
+      return;
+    }
+    if (hasCommandModifier(e)) return;
+
+    const letter = e.shiftKey ? "" : e.key.toLowerCase();
+    if (letter === "i" && item.track) {
+      e.preventDefault();
+      if (!playerState.isSelected(item.track.file_path)) {
+        playerState.selectSingleTrack(item.track);
+      }
+      playerState.showInspector = true;
+      return;
+    }
+    if (letter === "p" && item.track) {
+      e.preventDefault();
+      playerState.playlistModalTrack = item.track;
+      return;
+    }
+
+    const next = nextListIndex(e.key, index, items.length, {
+      pageSize: visibleItemCount(tableBodyEl),
+    });
+    if (next === null) return;
+    e.preventDefault();
+    if (e.shiftKey) {
+      playerState.extendSelection(item.track, items[next].track, audioTracks);
+    }
+    activeIndex = next;
+    focusNavItem(tableBodyEl, next);
+  }
+
   function onCheckboxClick(e: MouseEvent, track: AudioTrack) {
     e.stopPropagation();
     if (e.shiftKey) {
@@ -90,7 +171,7 @@
 <div class="folder-view">
   {#if items.length === 0}
     <div class="empty-state">
-      このフォルダにはアイテムがありません。
+      {playerState.isLoadingFolder ? "読み込み中…" : "このフォルダにはアイテムがありません。"}
     </div>
   {:else}
     <div class="list-table">
@@ -114,7 +195,7 @@
       </div>
 
       <div class="table-body" bind:this={tableBodyEl}>
-        {#each items as item}
+        {#each items as item, index}
           {@const isPlaying =
             playerState.playback.current_track?.file_path === item.path}
           {@const isLastPlayed =
@@ -135,16 +216,10 @@
             data-last-played={isLastPlayed ? "true" : undefined}
             onclick={(e) => onItemClick(e, item)}
             role="button"
-            tabindex="0"
-            onkeydown={(e) => {
-              if (e.key === "Enter") {
-                if (item.is_directory) playerState.navigateTo(item.path);
-                else if (item.track) {
-                  playerState.selectSingleTrack(item.track);
-                  playerState.playTrackInList(item.track, audioTracks);
-                }
-              }
-            }}
+            data-nav-item
+            tabindex={index === activeRow ? 0 : -1}
+            onfocus={() => (activeIndex = index)}
+            onkeydown={(e) => onRowKeydown(e, item, index)}
           >
             <!-- Selection Checkbox -->
             <span class="col-check">
@@ -152,8 +227,9 @@
                 <input
                   type="checkbox"
                   checked={isSelected}
+                  tabindex="-1"
                   onclick={(e) => onCheckboxClick(e, item.track!)}
-                  title="選択（複数一括編集用）"
+                  title="選択（複数一括編集用） (Ctrl+Space)"
                 />
               {/if}
             </span>
@@ -215,14 +291,16 @@
               {#if item.track}
                 <button
                   class="action-btn"
-                  title="プロパティを編集"
+                  tabindex="-1"
+                  title="プロパティを編集 (I)"
                   onclick={(e) => openInspectorForTrack(e, item.track!)}
                 >
                   🏷
                 </button>
                 <button
                   class="action-btn"
-                  title="プレイリストに追加"
+                  tabindex="-1"
+                  title="プレイリストに追加 (P)"
                   onclick={(e) => openAddToPlaylist(e, item.track!)}
                 >
                   +
@@ -246,7 +324,7 @@
   .empty-state {
     padding: 40px;
     text-align: center;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .list-table {
@@ -283,6 +361,7 @@
     font-size: 12px;
     color: var(--nord4);
     outline: none;
+    scroll-margin-top: 30px;
   }
 
   .table-row:hover {
@@ -323,7 +402,7 @@
   .col-num {
     width: 36px;
     text-align: center;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .table-row.is-playing .col-num {
@@ -353,14 +432,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .col-duration {
     width: 56px;
     text-align: right;
     font-variant-numeric: tabular-nums;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .col-actions {

@@ -40,7 +40,7 @@ export interface PlaybackState {
   volume: number;
   shuffle_mode: boolean;
   repeat_mode: number; // 0 = off, 1 = one, 2 = all
-  queue: AudioTrack[];
+  queue_version: number;
 }
 
 export interface AlbumResume {
@@ -77,6 +77,16 @@ export interface TagUpdateRequest {
   filename_to_title: boolean;
   artwork_data_url: string | null;
   clear_artwork: boolean;
+}
+
+export interface TagUpdateFailure {
+  file_path: string;
+  message: string;
+}
+
+export interface TagUpdateResult {
+  updated: AudioTrack[];
+  failed: TagUpdateFailure[];
 }
 
 export type ViewMode = "FOLDER" | "ARTWORK" | "PLAYLIST";

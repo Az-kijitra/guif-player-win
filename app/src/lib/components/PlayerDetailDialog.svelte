@@ -124,11 +124,11 @@
         <!-- Right: Playback Queue -->
         <div class="right-pane">
           <div class="queue-header">
-            再生キュー ({playerState.playback.queue.length} 曲)
+            再生キュー ({playerState.queue.length} 曲)
           </div>
 
           <div class="queue-list">
-            {#each playerState.playback.queue as qTrack, idx}
+            {#each playerState.queue as qTrack, idx}
               {@const isCur = qTrack.file_path === track?.file_path}
               <div
                 class="queue-item"
@@ -138,13 +138,13 @@
                 onclick={() =>
                   playerState.playTrackInList(
                     qTrack,
-                    playerState.playback.queue
+                    playerState.queue
                   )}
                 onkeydown={(e) => {
                   if (e.key === "Enter")
                     playerState.playTrackInList(
                       qTrack,
-                      playerState.playback.queue
+                      playerState.queue
                     );
                 }}
               >
@@ -269,7 +269,7 @@
 
   .detail-album {
     font-size: 11px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     margin-top: 2px;
   }
 
@@ -283,7 +283,7 @@
 
   .time-label {
     font-size: 11px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     width: 44px;
     text-align: center;
     font-variant-numeric: tabular-nums;
@@ -392,7 +392,7 @@
 
   .q-num {
     width: 24px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .q-info {
@@ -410,11 +410,11 @@
 
   .q-artist {
     font-size: 10px;
-    color: var(--nord3);
+    color: var(--ui-text-muted);
   }
 
   .q-dur {
-    color: var(--nord3);
+    color: var(--ui-text-muted);
     font-size: 11px;
   }
 </style>
