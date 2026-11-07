@@ -3,6 +3,7 @@
   import AddToPlaylistModal from "../lib/components/AddToPlaylistModal.svelte";
   import ArtworkGridView from "../lib/components/ArtworkGridView.svelte";
   import ErrorNotice from "../lib/components/ErrorNotice.svelte";
+  import SettingsDialog from "../lib/components/SettingsDialog.svelte";
   import FolderListView from "../lib/components/FolderListView.svelte";
   import NowPlayingBar from "../lib/components/NowPlayingBar.svelte";
   import PathHeader from "../lib/components/PathHeader.svelte";
@@ -89,6 +90,15 @@
       } else if (e.altKey && e.key === "ArrowLeft" && !isTextInput) {
         e.preventDefault();
         playerState.seek(Math.max(0, playerState.playback.position_ms - 5000));
+      } else if (e.ctrlKey && ["+", "=", ";"].includes(e.key)) {
+        e.preventDefault();
+        playerState.stepFontScale(1);
+      } else if (e.ctrlKey && e.key === "-") {
+        e.preventDefault();
+        playerState.stepFontScale(-1);
+      } else if (e.ctrlKey && e.key === "0") {
+        e.preventDefault();
+        playerState.setFontScale("normal");
       } else if (e.ctrlKey && e.key === "1") {
         e.preventDefault();
         playerState.setViewMode("FOLDER");
@@ -99,7 +109,9 @@
         e.preventDefault();
         playerState.setViewMode("PLAYLIST");
       } else if (e.key === "Escape") {
-        if (playerState.showDetailDialog) {
+        if (playerState.showSettings) {
+          playerState.showSettings = false;
+        } else if (playerState.showDetailDialog) {
           playerState.showDetailDialog = false;
         } else if (playerState.playlistModalTrack) {
           playerState.playlistModalTrack = null;
@@ -142,6 +154,7 @@
   <NowPlayingBar />
 
   <ErrorNotice />
+  <SettingsDialog />
 
   <!-- Modals -->
   <PlayerDetailDialog />

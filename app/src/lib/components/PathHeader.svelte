@@ -1,21 +1,6 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { playerState } from "../playerState.svelte";
-  import type { ThemeSetting } from "../types";
-
-  const THEME_OPTIONS: { value: ThemeSetting; label: string }[] = [
-    { value: "guif", label: "🎨 guif連動" },
-    { value: "nord", label: "🎨 Nord" },
-    { value: "default", label: "🎨 Default" },
-    { value: "monokai", label: "🎨 Monokai" },
-    { value: "catppuccin", label: "🎨 Catppuccin" },
-    { value: "solarized", label: "🎨 Solarized" },
-    { value: "light", label: "🎨 Light" },
-  ];
-
-  function onThemeChange(e: Event) {
-    const val = (e.target as HTMLSelectElement).value as ThemeSetting;
-    playerState.setTheme(val);
-  }
 
   function splitPath(fullPath: string): { name: string; path: string }[] {
     if (!fullPath) return [];
@@ -42,10 +27,35 @@
   }
 
   let segments = $derived(splitPath(playerState.currentPath));
+
+  // Narrow windows and large text show the tabs as icons only, rather than wrapping their names.
+  // The width they need depends on the number of drives, so it is measured, not fixed.
+  let topRowEl = $state<HTMLDivElement | null>(null);
+  let compact = $state(false);
+
+  async function fitTabs() {
+    if (!topRowEl) return;
+    compact = false;
+    await tick();
+    compact = topRowEl.scrollWidth > topRowEl.clientWidth;
+  }
+
+  $effect(() => {
+    if (!topRowEl) return;
+    const observer = new ResizeObserver(() => fitTabs());
+    observer.observe(topRowEl);
+    return () => observer.disconnect();
+  });
+
+  // More drives need more room
+  $effect(() => {
+    void playerState.drives.length;
+    fitTabs();
+  });
 </script>
 
 <header class="path-header">
-  <div class="top-row">
+  <div class="top-row" bind:this={topRowEl}>
     <!-- Drives -->
     <div class="drives">
       {#each playerState.drives as drive}
@@ -60,27 +70,30 @@
     </div>
 
     <!-- View Mode Switcher -->
-    <div class="mode-tabs">
+    <div class="mode-tabs" class:compact>
       <button
         class="tab-btn"
         class:active={playerState.viewMode === "FOLDER"}
+        title="フォルダ (Ctrl+1)"
         onclick={() => playerState.setViewMode("FOLDER")}
       >
-        📁 フォルダ
+        📁<span class="label">フォルダ</span>
       </button>
       <button
         class="tab-btn"
         class:active={playerState.viewMode === "ARTWORK"}
+        title="アルバム (Ctrl+2)"
         onclick={() => playerState.setViewMode("ARTWORK")}
       >
-        🖼 アルバム
+        🖼<span class="label">アルバム</span>
       </button>
       <button
         class="tab-btn"
         class:active={playerState.viewMode === "PLAYLIST"}
+        title="プレイリスト (Ctrl+3)"
         onclick={() => playerState.setViewMode("PLAYLIST")}
       >
-        📜 プレイリスト
+        📜<span class="label">プレイリスト</span>
       </button>
       <button
         class="tab-btn inspector-toggle"
@@ -88,22 +101,19 @@
         onclick={() => (playerState.showInspector = !playerState.showInspector)}
         title="右サイドのプロパティパネルを開閉 (Ctrl+I)"
       >
-        🏷 プロパティ
+        🏷<span class="label">プロパティ</span>
         {#if playerState.selectedTracks.length > 0}
           <span class="sel-count">{playerState.selectedTracks.length}</span>
         {/if}
       </button>
 
-      <select
-        class="theme-select"
-        value={playerState.themeSetting}
-        onchange={onThemeChange}
-        title={`カラーテーマ切替 (現在: ${playerState.resolvedTheme})`}
+      <button
+        class="tab-btn"
+        title="テーマと文字の大きさ"
+        onclick={() => (playerState.showSettings = true)}
       >
-        {#each THEME_OPTIONS as opt}
-          <option value={opt.value}>{opt.label}</option>
-        {/each}
-      </select>
+        ⚙<span class="label">設定</span>
+      </button>
     </div>
   </div>
 
@@ -195,6 +205,10 @@
   }
 
   .tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
     padding: 3px 10px;
     background: var(--nord2);
     border: 1px solid var(--nord3);
@@ -203,35 +217,19 @@
     font-size: 12px;
   }
 
+  .mode-tabs.compact .label {
+    display: none;
+  }
+
+  .mode-tabs.compact .tab-btn {
+    padding: 3px 7px;
+  }
+
   .tab-btn.active {
     background: var(--nord9);
     color: var(--nord0);
     border-color: var(--nord8);
     font-weight: bold;
-  }
-
-  .theme-select {
-    margin-left: 4px;
-    padding: 2px 6px;
-    background: var(--nord2);
-    border: 1px solid var(--nord3);
-    color: var(--nord4);
-    border-radius: 2px;
-    font-family: inherit;
-    font-size: 12px;
-    cursor: pointer;
-    outline: none;
-  }
-
-  .theme-select:hover,
-  .theme-select:focus {
-    border-color: var(--nord8);
-    color: var(--nord6);
-  }
-
-  .theme-select option {
-    background: var(--nord1);
-    color: var(--nord4);
   }
 
   .inspector-toggle {

@@ -521,6 +521,33 @@ fn get_theme_setting(state: State<'_, AppState>) -> String {
     "nord".to_string()
 }
 
+const FONT_SCALES: [&str; 4] = ["small", "normal", "large", "extra_large"];
+
+/// Anything unknown, such as a value from a newer version, is the normal size.
+fn normalize_font_scale(id: &str) -> &'static str {
+    FONT_SCALES
+        .iter()
+        .find(|known| **known == id)
+        .copied()
+        .unwrap_or("normal")
+}
+
+#[tauri::command]
+fn get_font_scale(state: State<'_, AppState>) -> String {
+    let saved = state.db.get_setting("font_scale").ok().flatten();
+    normalize_font_scale(saved.as_deref().unwrap_or("normal")).to_string()
+}
+
+#[tauri::command]
+fn save_font_scale(state: State<'_, AppState>, font_scale: String) -> Result<String, String> {
+    let id = normalize_font_scale(&font_scale);
+    state
+        .db
+        .set_setting("font_scale", id)
+        .map_err(|e| e.to_string())?;
+    Ok(id.to_string())
+}
+
 #[tauri::command]
 fn get_guif_theme_preset() -> String {
     read_guif_config_preset().unwrap_or_else(|| "nord".to_string())
@@ -706,6 +733,8 @@ pub fn run() {
             get_theme_setting,
             get_guif_theme_preset,
             save_theme_setting,
+            get_font_scale,
+            save_font_scale,
         ])
         .run(tauri::generate_context!())
         .expect("error while running guif-player");
@@ -759,6 +788,13 @@ mod command_tests {
 
         assert!(bookmark_current_track(&mut player, &db).is_err());
         assert!(db.get_bookmarks().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unknown_saved_font_scale_falls_back_to_normal() {
+        assert_eq!(normalize_font_scale("extra_large"), "extra_large");
+        assert_eq!(normalize_font_scale("huge"), "normal");
+        assert_eq!(normalize_font_scale(""), "normal");
     }
 
     #[test]

@@ -17,9 +17,9 @@ A-3 は Android 版のステータスバーに関する基準なので、Windows
 
 | ID | 受入基準 | 確認 |
 |---|---|---|
-| A-10 | 文字の大きさを 小(85%)、標準、大(115%)、特大(130%)から選べる | 計画(段階 D) |
-| A-11 | ダイアログ、再生画面、メニューの文字も同じ大きさにする | 計画(段階 D) |
-| A-12 | 特大でも、最小のウィンドウで上部のバーのボタンが収まり、一覧の文字が欠けない | 計画(段階 D) |
-| A-13 | 選んだ大きさを、起動し直しても保つ | 計画(段階 D) |
+| A-10 | 文字の大きさを 小(85%)、標準、大(115%)、特大(130%)から選べる | `font sizes go from small to extra large`、`the chosen font size is saved and the whole page is zoomed` |
+| A-11 | ダイアログ、再生画面、メニューの文字も同じ大きさにする | 手動 |
+| A-12 | 特大でも、最小のウィンドウで上部のバーのボタンが収まり、一覧の文字が欠けない | 手動 |
+| A-13 | 選んだ大きさを、起動し直しても保つ。保存した値が分からなければ標準にする | `the saved font size is applied when the app starts`、`an unknown saved font size falls back to normal`、`an_unknown_saved_font_scale_falls_back_to_normal` |
 
 Windows 版は、ブラウザーの拡大と同じく画面全体を拡大します。Android 版は文字だけを拡大します。

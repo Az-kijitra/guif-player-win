@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type {
   AlbumResume,
   AlbumSummary,
@@ -71,6 +72,11 @@ export const api = {
   getPlaylists: () => invoke<Playlist[]>("get_playlists"),
   createPlaylist: (name: string) => invoke<Playlist>("create_playlist", { name }),
   findMissingFiles: (paths: string[]) => invoke<string[]>("find_missing_files", { paths }),
+
+  // Text size
+  getFontScale: () => invoke<string>("get_font_scale"),
+  saveFontScale: (fontScale: string) => invoke<string>("save_font_scale", { fontScale }),
+  setZoom: (scale: number) => getCurrentWebview().setZoom(scale),
 
   // Bookmarks
   addBookmark: () => invoke<Bookmark>("add_bookmark"),

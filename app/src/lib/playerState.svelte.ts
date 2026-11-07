@@ -1,4 +1,5 @@
 import { folderResumePoint } from "./albumResume";
+import { type FontScaleId, fontScaleFromId, stepFontScale, zoomOf } from "./fontScale";
 import { api } from "./api";
 import type {
   AlbumResume,
@@ -17,6 +18,7 @@ import type {
 } from "./types";
 
 const THEME_STORAGE_KEY = "guif_player_theme_setting";
+const FONT_SCALE_STORAGE_KEY = "guif_player_font_scale";
 const RESOLVED_THEME_STORAGE_KEY = "guif_player_resolved_theme";
 
 const ERROR_DISPLAY_MS = 8000;
@@ -69,6 +71,8 @@ class PlayerStore {
 
   // Theme state (guif aligned)
   themeSetting = $state<ThemeSetting>("nord");
+  fontScale = $state<FontScaleId>("normal");
+  showSettings = $state<boolean>(false);
   resolvedTheme = $state<ThemePreset>("nord");
 
   constructor() {
@@ -81,6 +85,11 @@ class PlayerStore {
       if (cachedResolved && VALID_PRESETS.includes(cachedResolved)) {
         this.resolvedTheme = cachedResolved;
         applyThemeToDom(cachedResolved);
+      }
+      // The last size, applied before the database answers, so the page does not jump
+      this.fontScale = fontScaleFromId(localStorage.getItem(FONT_SCALE_STORAGE_KEY));
+      if (this.fontScale !== "normal") {
+        void api.setZoom(zoomOf(this.fontScale)).catch(() => {});
       }
     }
   }
@@ -157,6 +166,7 @@ class PlayerStore {
     try {
       await api.onPlaybackError((message) => this.showError(message));
       await this.loadTheme();
+      await this.loadFontScale();
       this.drives = await api.listDrives();
       const latestResume = await api.getLatestAlbumResume();
       const defaultPath = await api.getDefaultPath();
@@ -640,6 +650,35 @@ class PlayerStore {
     this.artworkVersion += 1;
 
     return result;
+  }
+
+  async loadFontScale() {
+    try {
+      this.applyFontScale(fontScaleFromId(await api.getFontScale()));
+    } catch (e) {
+      this.reportError("文字の大きさを読み込めません", e);
+    }
+  }
+
+  async setFontScale(id: FontScaleId) {
+    this.applyFontScale(id);
+    try {
+      await api.saveFontScale(id);
+    } catch (e) {
+      this.reportError("文字の大きさを保存できません", e);
+    }
+  }
+
+  async stepFontScale(step: 1 | -1) {
+    await this.setFontScale(stepFontScale(this.fontScale, step));
+  }
+
+  private applyFontScale(id: FontScaleId) {
+    this.fontScale = id;
+    void api.setZoom(zoomOf(id)).catch((e) => console.error("Failed to zoom:", e));
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(FONT_SCALE_STORAGE_KEY, id);
+    }
   }
 
   async loadTheme() {
