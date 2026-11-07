@@ -29,7 +29,11 @@
     tabindex="-1"
     onclick={() => (playerState.playlistModalTrack = null)}
     onkeydown={(e) => {
-      if (e.key === "Escape") playerState.playlistModalTrack = null;
+      if (e.key === "Escape") {
+        // Handled here: the window's Esc (such as closing an album) must not run too
+        e.stopPropagation();
+        playerState.playlistModalTrack = null;
+      }
     }}
   >
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

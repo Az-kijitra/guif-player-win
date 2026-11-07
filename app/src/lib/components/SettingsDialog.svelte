@@ -37,7 +37,11 @@
     tabindex="-1"
     onclick={close}
     onkeydown={(e) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") {
+        // Handled here: the window's Esc (such as closing an album) must not run too
+        e.stopPropagation();
+        close();
+      }
     }}
   >
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->

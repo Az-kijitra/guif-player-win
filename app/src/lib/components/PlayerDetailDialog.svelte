@@ -37,7 +37,11 @@
     tabindex="-1"
     onclick={() => (playerState.showDetailDialog = false)}
     onkeydown={(e) => {
-      if (e.key === "Escape") playerState.showDetailDialog = false;
+      if (e.key === "Escape") {
+        // Handled here: the window's Esc (such as closing an album) must not run too
+        e.stopPropagation();
+        playerState.showDetailDialog = false;
+      }
     }}
   >
     <!-- Modal Card (stop propagation on click) -->

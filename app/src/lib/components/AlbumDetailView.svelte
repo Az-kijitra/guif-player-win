@@ -63,6 +63,17 @@
     playerState.playTrackInList(track, tracks);
   }
 
+  function openInspectorForTrack(e: MouseEvent, track: AudioTrack) {
+    e.stopPropagation();
+    playerState.selectSingleTrack(track);
+    playerState.showInspector = true;
+  }
+
+  function openAddToPlaylist(e: MouseEvent, track: AudioTrack) {
+    e.stopPropagation();
+    playerState.playlistModalTrack = track;
+  }
+
   function onRowClick(e: MouseEvent, track: AudioTrack) {
     if (e.shiftKey) {
       e.preventDefault();
@@ -96,6 +107,11 @@
         playerState.selectSingleTrack(track);
       }
       playerState.showInspector = true;
+      return;
+    }
+    if (!e.shiftKey && e.key.toLowerCase() === "p") {
+      e.preventDefault();
+      playerState.playlistModalTrack = track;
       return;
     }
     const next = nextListIndex(e.key, index, tracks.length, { pageSize: visibleItemCount(listEl) });
@@ -186,6 +202,24 @@
         </span>
         <span class="artist">{track.artist}</span>
         <span class="duration">{formatTime(track.duration_ms)}</span>
+        <span class="row-actions">
+          <button
+            class="action-btn"
+            tabindex="-1"
+            title="プロパティを編集 (I)"
+            onclick={(e) => openInspectorForTrack(e, track)}
+          >
+            🏷
+          </button>
+          <button
+            class="action-btn"
+            tabindex="-1"
+            title="プレイリストに追加 (P)"
+            onclick={(e) => openAddToPlaylist(e, track)}
+          >
+            +
+          </button>
+        </span>
       </div>
     {/each}
   </div>
@@ -300,7 +334,7 @@
 
   .track-row {
     display: grid;
-    grid-template-columns: 40px minmax(0, 2fr) minmax(0, 1fr) 60px;
+    grid-template-columns: 40px minmax(0, 2fr) minmax(0, 1fr) 60px 64px;
     align-items: center;
     gap: 8px;
     padding: 7px 8px;
@@ -350,6 +384,29 @@
   .artist {
     color: var(--nord4);
     font-size: 12px;
+  }
+
+  .row-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+
+  .action-btn {
+    padding: 1px 5px;
+    background: var(--nord2);
+    color: var(--nord4);
+    border: 1px solid var(--nord3);
+    border-radius: 2px;
+    font-size: 11px;
+    font-weight: normal;
+    cursor: pointer;
+  }
+
+  .action-btn:hover {
+    background: var(--nord8);
+    color: var(--nord0);
+    border-color: var(--nord8);
   }
 
   .done {
