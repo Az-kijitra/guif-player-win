@@ -7,6 +7,7 @@
     visibleItemCount,
   } from "../listNavigation";
   import { formatTime, playerState } from "../playerState.svelte";
+  import BookmarkList from "./BookmarkList.svelte";
   import type { AudioTrack, Playlist } from "../types";
 
   let newPlaylistName = $state("");
@@ -177,6 +178,16 @@
       <button type="submit" class="create-btn" title="作成">+</button>
     </form>
 
+    <button
+      class="bookmarks-entry"
+      class:selected={playerState.showBookmarks}
+      title="しおりの一覧"
+      onclick={() => playerState.openBookmarks()}
+    >
+      ★ しおり
+      <span class="item-count">{playerState.bookmarks.length}件</span>
+    </button>
+
     <div class="playlist-list" bind:this={sidebarListEl}>
       {#each playerState.playlists as p, index}
         {@const isSelected = playerState.activePlaylistId === p.id}
@@ -212,7 +223,9 @@
 
   <!-- Playlist Tracks Main Pane -->
   <main class="main-content">
-    {#if playerState.activePlaylistId === null}
+    {#if playerState.showBookmarks}
+      <BookmarkList />
+    {:else if playerState.activePlaylistId === null}
       <div class="empty-state">
         左側のリストからプレイリストを選択してください。
       </div>
@@ -473,6 +486,23 @@
   .track-summary {
     font-size: 12px;
     color: var(--ui-text-muted);
+  }
+
+  .bookmarks-entry {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--nord3);
+    color: var(--nord13);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .bookmarks-entry.selected {
+    background: var(--nord2);
+    border-left: 3px solid var(--nord13);
+    font-weight: bold;
   }
 
   .play-buttons {

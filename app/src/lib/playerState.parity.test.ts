@@ -69,6 +69,30 @@ describe("playing a whole list", () => {
   });
 });
 
+describe("playing a list with missing tracks", () => {
+  beforeEach(() => {
+    playerState.missingPlaylistPaths = new Set([tracks[0].file_path, tracks[3].file_path]);
+  });
+
+  it("does not start on a missing track", async () => {
+    await playerState.playAll(tracks, false);
+    expect(mocked.playQueue).toHaveBeenLastCalledWith(tracks, 1, 0, false);
+
+    for (const random of [0, 0.4, 0.99]) {
+      vi.spyOn(Math, "random").mockReturnValue(random);
+      await playerState.playAll(tracks, true);
+      const start = mocked.playQueue.mock.lastCall![1];
+      expect([1, 2, 4]).toContain(start);
+    }
+  });
+
+  it("still tries when every track is missing", async () => {
+    playerState.missingPlaylistPaths = new Set(tracks.map((t) => t.file_path));
+    await playerState.playAll(tracks, true);
+    expect(mocked.playQueue).toHaveBeenLastCalledWith(tracks, 0, 0, true);
+  });
+});
+
 describe("resuming a folder", () => {
   it("plays the folder from where it was left off", async () => {
     playerState.albumResume = { album_path: "C:\\Music", last_file_path: tracks[3].file_path, position_ms: 61_000, updated_at: 1 };

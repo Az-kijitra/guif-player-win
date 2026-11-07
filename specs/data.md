@@ -55,11 +55,11 @@ D-29 は Windows 版で番号を付けた基準です。Android 版も再生が�
 
 | ID | 受入基準 | 確認 |
 |---|---|---|
-| D-40 | しおりは 1 つの曲に 1 つ。同じ曲で挟み直すと位置を上書きする | 計画(段階 C) |
-| D-41 | 複数の曲にしおりを挟め、一覧は新しく挟んだ順に並ぶ | 計画(段階 C) |
-| D-42 | 再生画面で、今の位置にしおりを挟み、挟んだ位置を知らせる | 計画(段階 C) |
-| D-43 | しおりを削除でき、ほかのしおりは残る | 計画(段階 C) |
-| D-44 | 一覧のしおりを選ぶと、その位置から再生し、アルバムの残りの曲に続ける | 計画(段階 C) |
-| D-45 | 曲が見つからなければ理由を表示し、しおりは残す | 計画(段階 C) |
-| D-46 | 古いデータベースを更新しても、データが残り、しおりを使える | 計画(段階 C) |
+| D-40 | しおりは 1 つの曲に 1 つ。同じ曲で挟み直すと位置を上書きする | `a_track_has_one_bookmark_and_bookmarking_it_again_moves_it` |
+| D-41 | 複数の曲にしおりを挟め、一覧は新しく挟んだ順に並ぶ | `bookmarks_of_several_tracks_are_listed_newest_first` |
+| D-42 | 再生画面で、今の位置にしおりを挟み、挟んだ位置を知らせる | `bookmarking_the_current_track_saves_where_it_is`、`bookmarking_with_nothing_playing_is_refused`、`bookmarking a track lists it and says where` |
+| D-43 | しおりを削除でき、ほかのしおりは残る | `deleting_a_bookmark_leaves_the_others`、`deleting a bookmark removes it from the list` |
+| D-44 | 一覧のしおりを選ぶと、その位置から再生し、アルバムの残りの曲に続ける | `playing a bookmark starts its track at the bookmark and keeps the album queued` |
+| D-45 | 曲が見つからなければ理由を表示し、しおりは残す | `playing a bookmark whose track is gone shows an error` |
+| D-46 | 古いデータベースを更新しても、データが残り、しおりを使える | `upgrading_to_bookmarks_keeps_the_data` |
 

@@ -2,6 +2,7 @@ import { folderResumePoint } from "./albumResume";
 import { api } from "./api";
 import type {
   AlbumResume,
+  Bookmark,
   AlbumSummary,
   AudioTrack,
   FolderContent,
@@ -102,11 +103,15 @@ class PlayerStore {
   private latestFolderRequest = 0;
   private folderCache = new Map<string, FolderContent>();
   missingPlaylistPaths = $state<Set<string>>(new Set());
+  bookmarks = $state<Bookmark[]>([]);
+  showBookmarks = $state<boolean>(false);
   // Where the open folder was left off, for its "resume" button
   albumResume = $state<AlbumResume | null>(null);
   private latestAlbumRequest = 0;
 
   errorMessage = $state<string | null>(null);
+  // "error" for failures, "info" for confirmations such as a bookmark being made
+  noticeKind = $state<"error" | "info">("error");
   private errorTimer: ReturnType<typeof setTimeout> | null = null;
 
   private syncInterval: number | null = null;
@@ -114,7 +119,16 @@ class PlayerStore {
   private wasPlaying = false;
 
   showError(message: string) {
+    this.showMessage(message, "error");
+  }
+
+  showNotice(message: string) {
+    this.showMessage(message, "info");
+  }
+
+  private showMessage(message: string, kind: "error" | "info") {
     if (this.errorTimer) clearTimeout(this.errorTimer);
+    this.noticeKind = kind;
     this.errorMessage = message;
     this.errorTimer = setTimeout(() => this.clearError(), ERROR_DISPLAY_MS);
   }
@@ -159,6 +173,7 @@ class PlayerStore {
       }
 
       await this.loadPlaylists();
+      await this.loadBookmarks();
       await this.loadResumes();
 
       // Poll playback state every 250ms
@@ -289,6 +304,7 @@ class PlayerStore {
   }
 
   async selectPlaylist(id: number) {
+    this.showBookmarks = false;
     this.activePlaylistId = id;
     this.missingPlaylistPaths = new Set();
     try {
@@ -388,8 +404,64 @@ class PlayerStore {
   /** Plays a whole list: in order from the top, or shuffled from a random track. */
   async playAll(tracks: AudioTrack[], shuffle: boolean) {
     if (tracks.length === 0) return;
-    const start = shuffle ? Math.floor(Math.random() * tracks.length) : 0;
+    // Starting on a track known to be missing would only fail
+    const playable = tracks
+      .map((_, index) => index)
+      .filter((index) => !this.missingPlaylistPaths.has(tracks[index].file_path));
+    const candidates = playable.length > 0 ? playable : [0];
+    const start = shuffle ? candidates[Math.floor(Math.random() * candidates.length)] : candidates[0];
     await this.startQueue(tracks, start, shuffle);
+  }
+
+  async openBookmarks() {
+    this.showBookmarks = true;
+    this.activePlaylistId = null;
+    await this.loadBookmarks();
+  }
+
+  async loadBookmarks() {
+    try {
+      this.bookmarks = await api.getBookmarks();
+    } catch (e) {
+      this.reportError("しおりを読み込めません", e);
+    }
+  }
+
+  /** Bookmarks the current position of the track playing (one per track: a new one replaces it). */
+  async addBookmark() {
+    try {
+      const made = await api.addBookmark();
+      this.showNotice(`しおりを挟みました: ${made.title} (${formatTime(made.position_ms)})`);
+      await this.loadBookmarks();
+    } catch (e) {
+      this.showError(String(e));
+    }
+  }
+
+  async deleteBookmark(filePath: string) {
+    try {
+      await api.deleteBookmark(filePath);
+      await this.loadBookmarks();
+    } catch (e) {
+      this.reportError("しおりを削除できません", e);
+    }
+  }
+
+  /** Plays from the bookmark, and then the rest of its album, as clicking the track would. */
+  async playBookmark(bookmark: Bookmark) {
+    let tracks: AudioTrack[] = [];
+    try {
+      const folder = await api.listFolder(bookmark.album_path);
+      tracks = folder.items.filter((i) => i.track !== null).map((i) => i.track as AudioTrack);
+    } catch {
+      // The folder is gone: reported below like a missing track
+    }
+    const index = tracks.findIndex((t) => t.file_path === bookmark.file_path);
+    if (index < 0) {
+      this.showError(`しおりの曲が見つかりません: ${bookmark.title}。ファイルの移動や削除を確認してください`);
+      return;
+    }
+    await this.startQueue(tracks, index, undefined, bookmark.position_ms);
   }
 
   /** The folder's tracks from where the album was left off (see albumResume.ts). */

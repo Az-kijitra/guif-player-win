@@ -4,6 +4,7 @@ import type {
   AlbumResume,
   AlbumSummary,
   AudioTrack,
+  Bookmark,
   FolderContent,
   PlaybackState,
   Playlist,
@@ -70,6 +71,11 @@ export const api = {
   getPlaylists: () => invoke<Playlist[]>("get_playlists"),
   createPlaylist: (name: string) => invoke<Playlist>("create_playlist", { name }),
   findMissingFiles: (paths: string[]) => invoke<string[]>("find_missing_files", { paths }),
+
+  // Bookmarks
+  addBookmark: () => invoke<Bookmark>("add_bookmark"),
+  getBookmarks: () => invoke<Bookmark[]>("get_bookmarks"),
+  deleteBookmark: (filePath: string) => invoke<void>("delete_bookmark", { filePath }),
   deletePlaylist: (id: number) => invoke<void>("delete_playlist", { id }),
   addToPlaylist: (playlistId: number, track: AudioTrack) =>
     invoke<void>("add_to_playlist", { playlistId, track }),

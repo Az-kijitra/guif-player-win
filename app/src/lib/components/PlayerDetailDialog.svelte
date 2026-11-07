@@ -21,6 +21,11 @@
     playerState.seek(val);
     isSeeking = false;
   }
+  let hasBookmark = $derived(
+    playerState.bookmarks.some(
+      (b) => b.file_path === playerState.playback.current_track?.file_path
+    )
+  );
 </script>
 
 {#if playerState.showDetailDialog}
@@ -119,6 +124,14 @@
               {playerState.playback.repeat_mode === 1 ? "🔂" : "🔁"}
             </button>
           </div>
+          <button
+            class="bookmark-btn"
+            class:has-bookmark={hasBookmark}
+            title={hasBookmark ? "しおりを今の位置に挟み直す (B)" : "今の位置にしおりを挟む (B)"}
+            onclick={() => playerState.addBookmark()}
+          >
+            {hasBookmark ? "★" : "☆"} しおり
+          </button>
         </div>
 
         <!-- Right: Playback Queue -->
@@ -164,6 +177,20 @@
 {/if}
 
 <style>
+  .bookmark-btn {
+    margin-top: 12px;
+    padding: 4px 14px;
+    border: 1px solid var(--nord3);
+    border-radius: 3px;
+    color: var(--nord4);
+    cursor: pointer;
+  }
+
+  .bookmark-btn.has-bookmark {
+    color: var(--nord13);
+    border-color: var(--nord13);
+  }
+
   .modal-backdrop {
     position: fixed;
     top: 0;

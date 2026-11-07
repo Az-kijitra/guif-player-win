@@ -100,3 +100,13 @@ export type ThemePreset =
   | "light";
 
 export type ThemeSetting = ThemePreset | "guif";
+
+export interface Bookmark {
+  file_path: string;
+  album_path: string;
+  title: string;
+  album: string;
+  position_ms: number;
+  duration_ms: number;
+  created_at: number;
+}

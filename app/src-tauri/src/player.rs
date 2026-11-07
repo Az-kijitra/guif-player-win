@@ -430,6 +430,11 @@ impl AudioPlayer {
         player
     }
 
+    #[cfg(test)]
+    pub(crate) fn clear_current_track_for_tests(&mut self) {
+        self.current_track = None;
+    }
+
     pub fn new() -> SharedPlayer {
         let stream_handle = match OutputStream::try_default() {
             Ok((stream, handle)) => {

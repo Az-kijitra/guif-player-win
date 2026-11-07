@@ -1,4 +1,4 @@
-use crate::models::{AlbumResume, AudioTrack, Playlist, TrackResume};
+use crate::models::{AlbumResume, AudioTrack, Bookmark, Playlist, TrackResume};
 use rusqlite::{params, Connection, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -50,7 +50,8 @@ fn resolve_db_path(base_dir: &Path) -> PathBuf {
 // One entry per schema version; PRAGMA user_version records how many have run.
 // Never change an entry once it has shipped: add a new one.
 // The first uses IF NOT EXISTS because databases from before versioning already have these tables.
-const MIGRATIONS: &[&str] = &[r#"
+const MIGRATIONS: &[&str] = &[
+    r#"
     CREATE TABLE IF NOT EXISTS album_resume (
         album_path TEXT PRIMARY KEY,
         last_file_path TEXT NOT NULL,
@@ -89,7 +90,20 @@ const MIGRATIONS: &[&str] = &[r#"
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     );
-    "#];
+    "#,
+    // 2: bookmarks, the same table as the Android version
+    r#"
+    CREATE TABLE bookmarks (
+        file_path TEXT PRIMARY KEY,
+        album_path TEXT NOT NULL,
+        title TEXT NOT NULL,
+        album TEXT NOT NULL,
+        position_ms INTEGER NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    "#,
+];
 
 /// Brings the schema up to date. Each step commits together with its version number, so a failure
 /// leaves the data as the last good step left it.
@@ -491,6 +505,66 @@ impl Database {
         Ok(())
     }
 
+    /// Puts a bookmark in its track, replacing the one already there, and moves it to the top.
+    pub fn set_bookmark(&self, bookmark: &Bookmark) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        // Deleting first gives a new row id, which orders bookmarks made in the same millisecond
+        tx.execute(
+            "DELETE FROM bookmarks WHERE file_path = ?1",
+            params![bookmark.file_path],
+        )?;
+        tx.execute(
+            r#"
+            INSERT INTO bookmarks (file_path, album_path, title, album, position_ms, duration_ms, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+            params![
+                bookmark.file_path,
+                bookmark.album_path,
+                bookmark.title,
+                bookmark.album,
+                bookmark.position_ms,
+                bookmark.duration_ms,
+                bookmark.created_at
+            ],
+        )?;
+        tx.commit()
+    }
+
+    /// The newest first.
+    pub fn get_bookmarks(&self) -> Result<Vec<Bookmark>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT file_path, album_path, title, album, position_ms, duration_ms, created_at
+            FROM bookmarks
+            ORDER BY created_at DESC, rowid DESC
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Bookmark {
+                file_path: row.get(0)?,
+                album_path: row.get(1)?,
+                title: row.get(2)?,
+                album: row.get(3)?,
+                position_ms: row.get(4)?,
+                duration_ms: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn delete_bookmark(&self, file_path: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM bookmarks WHERE file_path = ?1",
+            params![file_path],
+        )?;
+        Ok(())
+    }
+
     pub fn update_playlist_track_metadata(&self, track: &AudioTrack) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -688,6 +762,91 @@ mod tests {
             .query_row("SELECT id FROM first", [], |r| r.get(0))
             .unwrap();
         assert_eq!(kept, 1);
+    }
+
+    fn bookmark(file: &str, position_ms: u64, created_at: u64) -> Bookmark {
+        Bookmark {
+            file_path: file.to_string(),
+            album_path: "C:\\A".to_string(),
+            title: file.to_string(),
+            album: "Album".to_string(),
+            position_ms,
+            duration_ms: 300_000,
+            created_at,
+        }
+    }
+
+    #[test]
+    fn a_track_has_one_bookmark_and_bookmarking_it_again_moves_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open_at(&dir.path().join("a.db")).unwrap();
+        db.set_bookmark(&bookmark("1.mp3", 10_000, 1)).unwrap();
+        db.set_bookmark(&bookmark("2.mp3", 20_000, 2)).unwrap();
+
+        db.set_bookmark(&bookmark("1.mp3", 15_000, 3)).unwrap();
+
+        let saved = db.get_bookmarks().unwrap();
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0], bookmark("1.mp3", 15_000, 3));
+    }
+
+    #[test]
+    fn bookmarks_of_several_tracks_are_listed_newest_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open_at(&dir.path().join("a.db")).unwrap();
+        for (n, file) in ["1.mp3", "2.mp3", "3.mp3"].iter().enumerate() {
+            db.set_bookmark(&bookmark(file, 1_000, 7 + (n as u64 / 2)))
+                .unwrap();
+        }
+
+        let order: Vec<_> = db
+            .get_bookmarks()
+            .unwrap()
+            .into_iter()
+            .map(|b| b.file_path)
+            .collect();
+
+        assert_eq!(order, ["3.mp3", "2.mp3", "1.mp3"]);
+    }
+
+    #[test]
+    fn deleting_a_bookmark_leaves_the_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open_at(&dir.path().join("a.db")).unwrap();
+        db.set_bookmark(&bookmark("1.mp3", 1_000, 1)).unwrap();
+        db.set_bookmark(&bookmark("2.mp3", 1_000, 2)).unwrap();
+
+        db.delete_bookmark("1.mp3").unwrap();
+
+        let left: Vec<_> = db
+            .get_bookmarks()
+            .unwrap()
+            .into_iter()
+            .map(|b| b.file_path)
+            .collect();
+        assert_eq!(left, ["2.mp3"]);
+    }
+
+    #[test]
+    fn upgrading_to_bookmarks_keeps_the_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.db");
+        let mut conn = Connection::open(&path).unwrap();
+        run_migrations(&mut conn, &MIGRATIONS[..1]).unwrap();
+        conn.execute(
+            "INSERT INTO playlists (name, created_at) VALUES ('kept', 1)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = Database::open_at(&path).unwrap();
+
+        assert_eq!(db.get_playlists().unwrap()[0].name, "kept");
+        db.set_bookmark(&bookmark("1.mp3", 1_000, 1)).unwrap();
+        assert_eq!(db.get_bookmarks().unwrap().len(), 1);
+        drop(db);
+        assert_eq!(user_version(&path), 2);
     }
 
     #[test]

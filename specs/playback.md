@@ -11,7 +11,7 @@
 | P-5 | シャッフル中の「前の曲」は再生した順に戻る | `shuffle_previous_walks_back_and_next_returns_to_the_same_track` |
 | P-6 | リピートはオフ、全曲、1 曲の順に切り替わる | `repeat_mode_cycles_off_all_one_off` |
 | P-7 | シャッフルなしの全曲再生は、前回のシャッフルを引き継がない | `plays everything in order with shuffle off`、`play_all_without_shuffle_does_not_keep_the_earlier_shuffle` |
-| P-8 | シャッフル再生は、シャッフルをオンにして無作為な曲から始める | `plays everything shuffled from a random track` |
+| P-8 | シャッフル再生は、シャッフルをオンにして無作為な曲から始める。見つからない曲からは始めない | `plays everything shuffled from a random track`、`does not start on a missing track` |
 
 P-8 は Windows 版だけの基準です。Android 版のシャッフル再生は先頭の曲から始めます。
 

@@ -49,6 +49,16 @@
           playerState.selectAllTracks(playerState.playlistTracks);
           playerState.showInspector = true;
         }
+      } else if (
+        e.key.toLowerCase() === "b" &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        !isTextInput &&
+        playerState.playback.current_track
+      ) {
+        e.preventDefault();
+        playerState.addBookmark();
       } else if (e.key === " " && !e.ctrlKey && !isTextInput) {
         e.preventDefault();
         playerState.togglePlayPause();

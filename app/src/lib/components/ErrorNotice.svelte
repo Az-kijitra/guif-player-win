@@ -3,7 +3,11 @@
 </script>
 
 {#if playerState.errorMessage}
-  <div class="error-notice" role="alert">
+  <div
+    class="error-notice"
+    class:info={playerState.noticeKind === "info"}
+    role={playerState.noticeKind === "info" ? "status" : "alert"}
+  >
     <span class="message">{playerState.errorMessage}</span>
     <button
       class="close-btn"
@@ -32,6 +36,10 @@
     border: 1px solid var(--nord11);
     border-left-width: 4px;
     border-radius: 3px;
+  }
+
+  .error-notice.info {
+    border-color: var(--nord14);
   }
 
   .message {

@@ -15,7 +15,7 @@ use tauri::{Emitter, Manager, State};
 
 use crate::db::Database;
 use crate::models::{
-    AlbumResume, AlbumSummary, AudioTrack, FolderContent, PlaybackStateDto, Playlist,
+    AlbumResume, AlbumSummary, AudioTrack, Bookmark, FolderContent, PlaybackStateDto, Playlist,
     TagUpdateRequest, TagUpdateResult, TrackResume,
 };
 use crate::player::{AudioPlayer, SharedPlayer};
@@ -363,6 +363,50 @@ fn create_playlist(state: State<'_, AppState>, name: String) -> Result<Playlist,
     state.db.create_playlist(&name)
 }
 
+// ----------------------------------------------------
+// Bookmarks
+// ----------------------------------------------------
+
+/// Puts a bookmark at the current position of the current track.
+fn bookmark_current_track(player: &mut AudioPlayer, db: &Database) -> Result<Bookmark, String> {
+    let state = player.get_state_dto();
+    let track = state.current_track.ok_or("再生中の曲がありません")?;
+    let created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let bookmark = Bookmark {
+        album_path: resume::album_of(&track.file_path),
+        file_path: track.file_path,
+        title: track.title,
+        album: track.album,
+        position_ms: state.position_ms,
+        duration_ms: state.duration_ms,
+        created_at,
+    };
+    db.set_bookmark(&bookmark)
+        .map_err(|e| format!("しおりを保存できません: {}", e))?;
+    Ok(bookmark)
+}
+
+#[tauri::command]
+async fn add_bookmark(state: State<'_, AppState>) -> Result<Bookmark, String> {
+    with_player(state, bookmark_current_track).await?
+}
+
+#[tauri::command]
+fn get_bookmarks(state: State<'_, AppState>) -> Result<Vec<Bookmark>, String> {
+    state.db.get_bookmarks().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_bookmark(state: State<'_, AppState>, file_path: String) -> Result<(), String> {
+    state
+        .db
+        .delete_bookmark(&file_path)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn find_missing_files(paths: Vec<String>) -> Result<Vec<String>, String> {
     run_blocking(move || scanner::missing_files(&paths)).await
@@ -656,6 +700,9 @@ pub fn run() {
             get_playlist_tracks,
             remove_from_playlist,
             find_missing_files,
+            add_bookmark,
+            get_bookmarks,
+            delete_bookmark,
             get_theme_setting,
             get_guif_theme_preset,
             save_theme_setting,
@@ -667,6 +714,52 @@ pub fn run() {
 #[cfg(test)]
 mod command_tests {
     use super::*;
+
+    fn track(path: &str) -> AudioTrack {
+        AudioTrack {
+            file_path: path.to_string(),
+            file_name: "01.mp3".to_string(),
+            title: "First".to_string(),
+            artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            duration_ms: 200_000,
+            track_number: None,
+            has_artwork: false,
+        }
+    }
+
+    #[test]
+    fn bookmarking_the_current_track_saves_where_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open_at(&dir.path().join("a.db")).unwrap();
+        let path = Path::new("C:\\Music\\Album\\01.mp3")
+            .to_string_lossy()
+            .to_string();
+        let mut player = AudioPlayer::playing_for_tests(track(&path), Duration::from_secs(83));
+
+        let made = bookmark_current_track(&mut player, &db).unwrap();
+
+        assert_eq!(made.title, "First");
+        assert_eq!(made.album, "Album");
+        assert_eq!(made.album_path, resume::album_of(&path));
+        assert!(
+            (83_000..84_000).contains(&made.position_ms),
+            "{}",
+            made.position_ms
+        );
+        assert_eq!(db.get_bookmarks().unwrap(), [made]);
+    }
+
+    #[test]
+    fn bookmarking_with_nothing_playing_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open_at(&dir.path().join("a.db")).unwrap();
+        let mut player = AudioPlayer::playing_for_tests(track("a.mp3"), Duration::ZERO);
+        player.clear_current_track_for_tests();
+
+        assert!(bookmark_current_track(&mut player, &db).is_err());
+        assert!(db.get_bookmarks().unwrap().is_empty());
+    }
 
     #[test]
     fn pausing_records_the_position() {
