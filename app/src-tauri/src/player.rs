@@ -5,10 +5,12 @@ use rodio::{OutputStreamHandle, Sink, Source};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use symphonia::core::audio::{SampleBuffer, SignalSpec};
-use symphonia::core::codecs::{Decoder as SymphDecoder, DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::codecs::{
+    CodecRegistry, Decoder as SymphDecoder, DecoderOptions, CODEC_TYPE_NULL,
+};
 use symphonia::core::errors::Error as SymphError;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::{MediaSource, MediaSourceStream};
@@ -257,7 +259,7 @@ impl SymphoniaSource {
                     Duration::new(seconds, nanos)
                 });
 
-        let mut decoder = symphonia::default::get_codecs()
+        let mut decoder = codecs()
             .make(&codec_params, &DecoderOptions::default())
             .map_err(|_| "この音声形式には対応していません".to_string())?;
 
@@ -400,6 +402,17 @@ impl Source for SymphoniaSource {
         }
         Ok(())
     }
+}
+
+/// Symphonia's own decoders, and Opus through libopus
+fn codecs() -> &'static CodecRegistry {
+    static CODECS: OnceLock<CodecRegistry> = OnceLock::new();
+    CODECS.get_or_init(|| {
+        let mut registry = CodecRegistry::new();
+        symphonia::default::register_enabled_codecs(&mut registry);
+        registry.register_all::<symphonia_adapter_libopus::OpusDecoder>();
+        registry
+    })
 }
 
 pub struct AudioPlayer {
@@ -799,6 +812,49 @@ impl AudioPlayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const OPUS_TONE: &[u8] = include_bytes!("../testdata/tone-440-660.opus");
+
+    fn crossings_per_second(samples: &[f32]) -> f32 {
+        let body = &samples[samples.len() / 10..samples.len() * 9 / 10];
+        let crossings = body
+            .windows(2)
+            .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+            .count();
+        crossings as f32 / (body.len() as f32 / 48_000.0)
+    }
+
+    #[test]
+    fn opus_files_play_with_both_channels_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tone.opus");
+        fs::write(&path, OPUS_TONE).unwrap();
+        let source = SymphoniaSource::from_path(&path).unwrap();
+        assert_eq!((source.channels(), source.sample_rate()), (2, 48_000));
+        let samples: Vec<f32> = source.collect();
+
+        let seconds = samples.len() as f32 / 2.0 / 48_000.0;
+        assert!(
+            (seconds - 2.0).abs() < 0.03,
+            "the encoder's padding is skipped: {seconds}"
+        );
+        let left: Vec<f32> = samples.iter().step_by(2).copied().collect();
+        let right: Vec<f32> = samples.iter().skip(1).step_by(2).copied().collect();
+        let (l, r) = (crossings_per_second(&left), crossings_per_second(&right));
+        assert!((l - 440.0).abs() < 3.0, "left {l}");
+        assert!((r - 660.0).abs() < 3.0, "right {r}");
+    }
+
+    #[test]
+    fn opus_files_can_be_seeked() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tone.opus");
+        fs::write(&path, OPUS_TONE).unwrap();
+        let mut source = SymphoniaSource::from_path(&path).unwrap();
+        source.try_seek(Duration::from_millis(1500)).unwrap();
+        let rest = source.count() as f32 / 2.0 / 48_000.0;
+        assert!((rest - 0.5).abs() < 0.05, "half a second left: {rest}");
+    }
 
     #[test]
     fn a_new_output_device_goes_on_from_the_same_place() {

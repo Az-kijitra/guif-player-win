@@ -28,6 +28,8 @@ Tauri 2 のデスクトップアプリです。画面は Svelte 5、音声とフ
 |---|---|
 | [rodio](https://crates.io/crates/rodio) | 音声出力 |
 | [symphonia](https://crates.io/crates/symphonia) | デコード |
+| [symphonia-adapter-libopus](https://crates.io/crates/symphonia-adapter-libopus) | Opus のデコード(libopus)。symphonia 0.5 には Opus のデコーダーがないため |
+| [wsola](https://crates.io/crates/wsola) | 音の高さを保った再生速度の変更 |
 | [lofty](https://crates.io/crates/lofty) | タグの読み書き |
 | [rusqlite](https://crates.io/crates/rusqlite) | SQLite |
 

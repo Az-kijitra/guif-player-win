@@ -145,12 +145,12 @@ Windows の「設定」の「アプリ」から「guif-player」をアンイン�
 | FLAC | `.flac` |
 | AAC / ALAC | `.m4a`、`.aac` |
 | Ogg Vorbis | `.ogg` |
+| Opus | `.opus` |
 | WAV | `.wav` |
 | AIFF | `.aif`、`.aiff` |
 
 次のものは再生できません。
 
-- Opus(`.opus`): 今後対応する予定です。
 - WMA(`.wma`)
 - DRM で保護された曲(iTunes Store の古い購入曲や Apple Music の曲など)。再生しようとすると、画面にその旨を表示します。
 

@@ -33,7 +33,7 @@ P-8 は Windows 版だけの基準です。Android 版のシャッフル再生�
 | P-21 | WAV と AIFF をデコードできる | `decodes_wav`、`decodes_aiff` |
 | P-22 | タグの領域に読めないデータがある M4A を、ファイルを変えずに再生できる | `the_atom_reads_as_free_however_the_reads_are_split_and_the_file_is_unchanged`、手動 |
 | P-23 | MP3、FLAC、AAC、ALAC、Ogg を再生できる | 手動 |
-| P-24 | Opus を再生できる | 計画(段階 G) |
+| P-24 | Opus を再生できる | `opus_files_play_with_both_channels_in_place`、`opus_files_can_be_seeked`、`reads_the_tags_of_an_opus_file`、`writes_tags_in_opus`、`playable_formats_are_listed` |
 
 ## エラー
 

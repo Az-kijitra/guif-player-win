@@ -32,9 +32,9 @@
 
 ### 対応形式
 
-MP3 (`.mp3`)、FLAC (`.flac`)、AAC / ALAC (`.m4a`、`.aac`)、Ogg Vorbis (`.ogg`)、WAV (`.wav`)、AIFF (`.aif`、`.aiff`)
+MP3 (`.mp3`)、FLAC (`.flac`)、AAC / ALAC (`.m4a`、`.aac`)、Ogg Vorbis (`.ogg`)、Opus (`.opus`)、WAV (`.wav`)、AIFF (`.aif`、`.aiff`)
 
-Opus (`.opus`) には今後対応する予定です。WMA (`.wma`) と、DRM で保護された曲(iTunes Store の古い購入曲や Apple Music の曲など)は再生できません。
+WMA (`.wma`) と、DRM で保護された曲(iTunes Store の古い購入曲や Apple Music の曲など)は再生できません。
 
 ---
 
@@ -53,7 +53,9 @@ Opus (`.opus`) には今後対応する予定です。WMA (`.wma`) と、DRM で
 
 ### ソースからビルドする
 
-Rust 1.90 以上、Node.js 22.17 以上、Microsoft Edge WebView2 ランタイムが必要です。
+Rust 1.90 以上、Node.js 22.17 以上、CMake、Microsoft Edge WebView2 ランタイムが必要です。CMake は Opus のデコーダー(libopus)をビルドするために使います。
+
+> リポジトリのパスが 90 文字ほどを超える深いフォルダーに置くと、ビルドが失敗します。libopus のビルドが Windows のパスの長さの上限(260 文字)を超えるためです。`C:\src` のような浅いフォルダーに置いてください。
 
 ```powershell
 git clone https://github.com/Az-kijitra/guif-player-win.git

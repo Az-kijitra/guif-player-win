@@ -42,7 +42,7 @@ pub fn is_supported_audio(path: &Path) -> bool {
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         matches!(
             ext.to_lowercase().as_str(),
-            "mp3" | "flac" | "m4a" | "aac" | "ogg" | "wav" | "aif" | "aiff"
+            "mp3" | "flac" | "m4a" | "aac" | "ogg" | "opus" | "wav" | "aif" | "aiff"
         )
     } else {
         false
@@ -1043,10 +1043,44 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), wav_bytes());
     }
 
+    const OPUS_TONE: &[u8] = include_bytes!("../testdata/tone-440-660.opus");
+
+    #[test]
+    fn reads_the_tags_of_an_opus_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "tone.opus", OPUS_TONE);
+        let track = parse_track(&path);
+        assert_eq!(
+            (
+                track.title.as_str(),
+                track.artist.as_str(),
+                track.album.as_str()
+            ),
+            ("Opus Tone", "guif-player tests", "Fixtures")
+        );
+        assert!(
+            (1950..=2050).contains(&track.duration_ms),
+            "{}",
+            track.duration_ms
+        );
+    }
+
+    #[test]
+    fn writes_tags_in_opus() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "tone.opus", OPUS_TONE);
+        let before = parse_track(&path).duration_ms;
+        saves_title(&path);
+        let after = parse_track(&path);
+        assert_eq!(after.artist, "guif-player tests", "other tags are kept");
+        assert_eq!(after.duration_ms, before);
+    }
+
     #[test]
     fn playable_formats_are_listed() {
         for name in [
-            "a.mp3", "a.flac", "a.m4a", "a.aac", "a.ogg", "a.wav", "a.aif", "a.aiff", "A.MP3",
+            "a.mp3", "a.flac", "a.m4a", "a.aac", "a.ogg", "a.opus", "a.wav", "a.aif", "a.aiff",
+            "A.MP3",
         ] {
             assert!(is_supported_audio(Path::new(name)), "{name}");
         }
@@ -1054,15 +1088,7 @@ mod tests {
 
     #[test]
     fn formats_without_a_decoder_are_not_listed() {
-        for name in [
-            "a.opus",
-            "a.wma",
-            "a.alac",
-            "a.txt",
-            "mp3",
-            "._a.mp3",
-            "dir/._a.m4a",
-        ] {
+        for name in ["a.wma", "a.alac", "a.txt", "mp3", "._a.mp3", "dir/._a.m4a"] {
             assert!(!is_supported_audio(Path::new(name)), "{name}");
         }
     }
