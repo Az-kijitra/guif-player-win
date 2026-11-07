@@ -137,7 +137,7 @@
       onclick={() => {
         if (playerState.viewMode === "ARTWORK") playerState.loadAlbums();
         else if (playerState.viewMode === "PLAYLIST") playerState.loadPlaylists();
-        else playerState.navigateTo(playerState.currentPath);
+        else playerState.refreshFolder();
       }}
       title="更新"
     >

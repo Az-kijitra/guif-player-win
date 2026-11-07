@@ -17,6 +17,8 @@ const THEME_STORAGE_KEY = "guif_player_theme_setting";
 const RESOLVED_THEME_STORAGE_KEY = "guif_player_resolved_theme";
 
 const ERROR_DISPLAY_MS = 8000;
+// Folders opened lately show at once when opened again, and are then read again in the background
+const FOLDER_CACHE_SIZE = 20;
 
 const VALID_PRESETS: ThemePreset[] = [
   "nord",
@@ -96,6 +98,8 @@ class PlayerStore {
   isLoadingAlbums = $state<boolean>(false);
   // Scans run in the background now, so an older answer can arrive after a newer request
   private latestFolderRequest = 0;
+  private folderCache = new Map<string, FolderContent>();
+  missingPlaylistPaths = $state<Set<string>>(new Set());
   private latestAlbumRequest = 0;
 
   errorMessage = $state<string | null>(null);
@@ -193,16 +197,24 @@ class PlayerStore {
     return state;
   }
 
-  async navigateTo(path: string) {
+  async navigateTo(path: string, { useCache = true } = {}) {
     const request = ++this.latestFolderRequest;
-    this.isLoadingFolder = true;
+    const cached = useCache ? this.folderCache.get(path) : undefined;
+    if (cached) {
+      this.currentPath = path;
+      this.folderContent = cached;
+    } else {
+      this.isLoadingFolder = true;
+    }
     try {
       const content = await api.listFolder(path);
+      this.rememberFolder(content);
       if (request !== this.latestFolderRequest) return;
       this.currentPath = path;
       this.folderContent = content;
       await this.loadResumes();
     } catch (e) {
+      this.folderCache.delete(path);
       if (request === this.latestFolderRequest) {
         this.reportError("フォルダーを開けません", e);
       }
@@ -210,6 +222,22 @@ class PlayerStore {
       if (request === this.latestFolderRequest) {
         this.isLoadingFolder = false;
       }
+    }
+  }
+
+  /** Reads the folder again, ignoring what was remembered. */
+  async refreshFolder() {
+    if (this.currentPath) {
+      await this.navigateTo(this.currentPath, { useCache: false });
+    }
+  }
+
+  private rememberFolder(content: FolderContent) {
+    this.folderCache.delete(content.current_path);
+    this.folderCache.set(content.current_path, content);
+    while (this.folderCache.size > FOLDER_CACHE_SIZE) {
+      const oldest = this.folderCache.keys().next().value as string;
+      this.folderCache.delete(oldest);
     }
   }
 
@@ -249,21 +277,39 @@ class PlayerStore {
 
   async selectPlaylist(id: number) {
     this.activePlaylistId = id;
+    this.missingPlaylistPaths = new Set();
     try {
-      this.playlistTracks = await api.getPlaylistTracks(id);
+      const tracks = await api.getPlaylistTracks(id);
+      this.playlistTracks = tracks;
+      const missing = await api.findMissingFiles(tracks.map((t) => t.file_path));
+      if (this.activePlaylistId !== id) return;
+      this.missingPlaylistPaths = new Set(missing);
+      if (missing.length > 0) {
+        this.showError(`見つからない曲が ${missing.length} 曲あります。移動または削除された可能性があります`);
+      }
     } catch (e) {
       this.reportError("プレイリストの曲を読み込めません", e);
     }
   }
 
-  async createPlaylist(name: string) {
-    if (!name.trim()) return;
+  /** The new playlist, or null when it could not be made (the reason is shown). */
+  async createPlaylist(name: string): Promise<Playlist | null> {
+    if (!name.trim()) return null;
     try {
       const p = await api.createPlaylist(name.trim());
       await this.loadPlaylists();
       await this.selectPlaylist(p.id);
+      return p;
     } catch (e) {
       this.reportError("プレイリストを作成できません", e);
+      return null;
+    }
+  }
+
+  async createPlaylistAndAdd(name: string, track: AudioTrack) {
+    const created = await this.createPlaylist(name);
+    if (created) {
+      await this.addTrackToPlaylist(created.id, track);
     }
   }
 
@@ -317,12 +363,22 @@ class PlayerStore {
   }
 
   async playTrackInList(track: AudioTrack, trackList: AudioTrack[]) {
-    try {
-      const index = trackList.findIndex((t) => t.file_path === track.file_path);
-      const resume = this.trackResumes[track.file_path];
-      const initialPos = resume && !resume.is_completed ? resume.position_ms : 0;
+    const index = trackList.findIndex((t) => t.file_path === track.file_path);
+    await this.startQueue(trackList, Math.max(0, index));
+  }
 
-      await api.playQueue(trackList, Math.max(0, index), initialPos);
+  /** Plays a whole list: in order from the top, or shuffled from a random track. */
+  async playAll(tracks: AudioTrack[], shuffle: boolean) {
+    if (tracks.length === 0) return;
+    const start = shuffle ? Math.floor(Math.random() * tracks.length) : 0;
+    await this.startQueue(tracks, start, shuffle);
+  }
+
+  private async startQueue(tracks: AudioTrack[], index: number, shuffle?: boolean) {
+    try {
+      const resume = this.trackResumes[tracks[index].file_path];
+      const initialPos = resume && !resume.is_completed ? resume.position_ms : 0;
+      await api.playQueue(tracks, index, initialPos, shuffle);
       await this.refreshPlayback();
     } catch (e) {
       this.showError(String(e));
@@ -460,6 +516,7 @@ class PlayerStore {
     // Refresh current folder & playlist
     if (this.currentPath) {
       this.folderContent = await api.listFolder(this.currentPath);
+      this.rememberFolder(this.folderContent);
     }
     if (this.viewMode === "ARTWORK" && this.currentPath) {
       this.albums = await api.listAlbums(this.currentPath);

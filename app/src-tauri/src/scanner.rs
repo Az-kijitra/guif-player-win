@@ -156,6 +156,15 @@ pub fn list_albums(root_dir: &str) -> Vec<AlbumSummary> {
     result
 }
 
+/// The paths that no longer point at a file.
+pub fn missing_files(paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|path| !Path::new(path).is_file())
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,5 +259,22 @@ mod tests {
 
         let names: Vec<_> = albums.iter().map(|a| a.album_name.as_str()).collect();
         assert_eq!(names, ["A", "b", "c"]);
+    }
+
+    #[test]
+    fn missing_files_are_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let here = dir.path().join("here.wav");
+        fs::write(&here, wav_bytes()).unwrap();
+        let gone = dir.path().join("gone.wav").to_string_lossy().to_string();
+        let folder = dir.path().to_string_lossy().to_string();
+
+        let missing = missing_files(&[
+            here.to_string_lossy().to_string(),
+            gone.clone(),
+            folder.clone(),
+        ]);
+
+        assert_eq!(missing, [gone, folder]);
     }
 }

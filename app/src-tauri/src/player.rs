@@ -417,6 +417,19 @@ pub struct AudioPlayer {
 pub type SharedPlayer = Arc<Mutex<AudioPlayer>>;
 
 impl AudioPlayer {
+    /// A player that has been playing `track` for `elapsed`, with no audio device behind it.
+    #[cfg(test)]
+    pub(crate) fn playing_for_tests(track: AudioTrack, elapsed: Duration) -> Self {
+        let mut player = Self::with_output(None);
+        player.current_track = Some(track.clone());
+        player.queue.set_tracks(vec![track], 0);
+        let (sink, _queue) = Sink::new_idle();
+        player.sink = Some(sink);
+        player.is_playing = true;
+        player.start_time = Instant::now().checked_sub(elapsed);
+        player
+    }
+
     pub fn new() -> SharedPlayer {
         let stream_handle = match OutputStream::try_default() {
             Ok((stream, handle)) => {
@@ -500,9 +513,13 @@ impl AudioPlayer {
         queue: Vec<AudioTrack>,
         start_index: usize,
         initial_pos_ms: u64,
+        shuffle: Option<bool>,
     ) -> Result<(), String> {
         if let Some(track) = queue.get(start_index).cloned() {
             self.play_track(track, initial_pos_ms)?;
+            if let Some(shuffle) = shuffle {
+                self.queue.set_shuffle(shuffle);
+            }
             self.queue.set_tracks(queue, start_index);
         }
         Ok(())
@@ -915,6 +932,7 @@ mod tests {
     fn repeat_one_stops_when_the_track_cannot_be_played_again() {
         let mut player = player_at_track_end(2);
         player.toggle_repeat();
+        player.toggle_repeat();
 
         assert!(player.handle_track_end().is_err());
 
@@ -937,7 +955,6 @@ mod tests {
     #[test]
     fn repeat_all_stops_once_every_track_has_failed() {
         let mut player = player_at_track_end(3);
-        player.toggle_repeat();
         player.toggle_repeat();
 
         assert!(player.handle_track_end().is_err());

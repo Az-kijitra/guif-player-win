@@ -3,6 +3,7 @@ pub mod metadata;
 pub mod models;
 pub mod player;
 pub mod queue;
+pub mod resume;
 pub mod scanner;
 #[cfg(test)]
 mod test_audio;
@@ -141,6 +142,7 @@ async fn update_tracks_metadata(
 // Playback Commands
 // ----------------------------------------------------
 
+/// The track playing now becomes the album's place to come back to.
 fn record_current_track_resume(player: &AudioPlayer, db: &Database) {
     let dto = player.get_state_dto();
     if let Some(cur) = dto.current_track {
@@ -158,6 +160,7 @@ async fn play_track(
     initial_pos_ms: Option<u64>,
 ) -> Result<(), String> {
     with_player(state, move |player, db| {
+        resume::record_position(&player.get_state_dto(), db);
         player.play_track(track, initial_pos_ms.unwrap_or(0))?;
         record_current_track_resume(player, db);
         Ok(())
@@ -171,9 +174,11 @@ async fn play_queue(
     queue: Vec<AudioTrack>,
     start_index: usize,
     initial_pos_ms: Option<u64>,
+    shuffle: Option<bool>,
 ) -> Result<(), String> {
     with_player(state, move |player, db| {
-        player.set_queue(queue, start_index, initial_pos_ms.unwrap_or(0))?;
+        resume::record_position(&player.get_state_dto(), db);
+        player.set_queue(queue, start_index, initial_pos_ms.unwrap_or(0), shuffle)?;
         record_current_track_resume(player, db);
         Ok(())
     })
@@ -184,6 +189,7 @@ async fn play_queue(
 async fn toggle_play_pause(state: State<'_, AppState>) -> Result<(), String> {
     with_player(state, |player, db| {
         player.toggle_play_pause()?;
+        resume::record_position(&player.get_state_dto(), db);
         record_current_track_resume(player, db);
         Ok(())
     })
@@ -192,11 +198,13 @@ async fn toggle_play_pause(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 async fn pause(state: State<'_, AppState>) -> Result<(), String> {
-    with_player(state, |player, db| {
-        player.pause();
-        record_current_track_resume(player, db);
-    })
-    .await
+    with_player(state, pause_and_record).await
+}
+
+fn pause_and_record(player: &mut AudioPlayer, db: &Database) {
+    player.pause();
+    resume::record_position(&player.get_state_dto(), db);
+    record_current_track_resume(player, db);
 }
 
 #[tauri::command]
@@ -221,6 +229,7 @@ async fn set_volume(state: State<'_, AppState>, volume: f32) -> Result<(), Strin
 #[tauri::command]
 async fn play_next(state: State<'_, AppState>) -> Result<(), String> {
     with_player(state, |player, db| {
+        resume::record_position(&player.get_state_dto(), db);
         player.play_next()?;
         record_current_track_resume(player, db);
         Ok(())
@@ -231,6 +240,7 @@ async fn play_next(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 async fn play_previous(state: State<'_, AppState>) -> Result<(), String> {
     with_player(state, |player, db| {
+        resume::record_position(&player.get_state_dto(), db);
         player.play_previous()?;
         record_current_track_resume(player, db);
         Ok(())
@@ -350,7 +360,12 @@ fn get_playlists(state: State<'_, AppState>) -> Result<Vec<Playlist>, String> {
 
 #[tauri::command]
 fn create_playlist(state: State<'_, AppState>, name: String) -> Result<Playlist, String> {
-    state.db.create_playlist(&name).map_err(|e| e.to_string())
+    state.db.create_playlist(&name)
+}
+
+#[tauri::command]
+async fn find_missing_files(paths: Vec<String>) -> Result<Vec<String>, String> {
+    run_blocking(move || scanner::missing_files(&paths)).await
 }
 
 #[tauri::command]
@@ -580,15 +595,13 @@ pub fn run() {
                         if state_dto.repeat_mode != REPEAT_ONE {
                             // Mark current completed in DB
                             if let Some(cur) = &state_dto.current_track {
-                                if let Some(parent) = Path::new(&cur.file_path).parent() {
-                                    let _ = thread_db.save_track_resume(
-                                        &cur.file_path,
-                                        &parent.to_string_lossy(),
-                                        cur.duration_ms,
-                                        cur.duration_ms,
-                                        true,
-                                    );
-                                }
+                                let _ = thread_db.save_resume(
+                                    &resume::album_of(&cur.file_path),
+                                    &cur.file_path,
+                                    cur.duration_ms,
+                                    cur.duration_ms,
+                                    true,
+                                );
                             }
                         }
                         if let Err(e) = p.handle_track_end() {
@@ -599,27 +612,7 @@ pub fn run() {
                         && last_resume_save.elapsed() >= RESUME_SAVE_INTERVAL
                     {
                         last_resume_save = Instant::now();
-                        if state_dto.position_ms > 1000 {
-                            if let Some(cur) = &state_dto.current_track {
-                                if let Some(parent) = Path::new(&cur.file_path).parent() {
-                                    let album_path = parent.to_string_lossy().to_string();
-                                    let is_completed = state_dto.duration_ms > 0
-                                        && state_dto.position_ms + 3000 >= state_dto.duration_ms;
-                                    let _ = thread_db.save_album_resume(
-                                        &album_path,
-                                        &cur.file_path,
-                                        state_dto.position_ms,
-                                    );
-                                    let _ = thread_db.save_track_resume(
-                                        &cur.file_path,
-                                        &album_path,
-                                        state_dto.position_ms,
-                                        state_dto.duration_ms,
-                                        is_completed,
-                                    );
-                                }
-                            }
-                        }
+                        resume::record_position(&state_dto, &thread_db);
                     }
                 }
             });
@@ -662,10 +655,50 @@ pub fn run() {
             add_to_playlist,
             get_playlist_tracks,
             remove_from_playlist,
+            find_missing_files,
             get_theme_setting,
             get_guif_theme_preset,
             save_theme_setting,
         ])
         .run(tauri::generate_context!())
         .expect("error while running guif-player");
+}
+
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+
+    #[test]
+    fn pausing_records_the_position() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open_at(&dir.path().join("a.db")).unwrap();
+        let path = Path::new("C:\\Music\\Album\\01.mp3")
+            .to_string_lossy()
+            .to_string();
+        let track = AudioTrack {
+            file_path: path.clone(),
+            file_name: "01.mp3".to_string(),
+            title: "01".to_string(),
+            artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            duration_ms: 200_000,
+            track_number: None,
+            has_artwork: false,
+        };
+        let mut player = AudioPlayer::playing_for_tests(track, Duration::from_secs(42));
+
+        pause_and_record(&mut player, &db);
+
+        let saved = db.get_track_resume(&path).unwrap().unwrap();
+        assert!(
+            (42_000..43_000).contains(&saved.position_ms),
+            "{}",
+            saved.position_ms
+        );
+        let album = db
+            .get_album_resume(&resume::album_of(&path))
+            .unwrap()
+            .unwrap();
+        assert_eq!(album.last_file_path, path);
+    }
 }

@@ -26,8 +26,9 @@ export const api = {
     listen<string>("playback-error", (event) => handler(event.payload)),
   playTrack: (track: AudioTrack, initialPosMs?: number) =>
     invoke<void>("play_track", { track, initialPosMs }),
-  playQueue: (queue: AudioTrack[], startIndex: number, initialPosMs?: number) =>
-    invoke<void>("play_queue", { queue, startIndex, initialPosMs }),
+  // shuffle: undefined keeps the current setting
+  playQueue: (queue: AudioTrack[], startIndex: number, initialPosMs?: number, shuffle?: boolean) =>
+    invoke<void>("play_queue", { queue, startIndex, initialPosMs, shuffle }),
   togglePlayPause: () => invoke<void>("toggle_play_pause"),
   pause: () => invoke<void>("pause"),
   resume: () => invoke<void>("resume"),
@@ -68,6 +69,7 @@ export const api = {
   // Playlists
   getPlaylists: () => invoke<Playlist[]>("get_playlists"),
   createPlaylist: (name: string) => invoke<Playlist>("create_playlist", { name }),
+  findMissingFiles: (paths: string[]) => invoke<string[]>("find_missing_files", { paths }),
   deletePlaylist: (id: number) => invoke<void>("delete_playlist", { id }),
   addToPlaylist: (playlistId: number, track: AudioTrack) =>
     invoke<void>("add_to_playlist", { playlistId, track }),

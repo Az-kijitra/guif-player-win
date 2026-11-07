@@ -67,8 +67,18 @@ impl PlayQueue {
         self.start_shuffle_round();
     }
 
+    /// Off, then all, then one, as in most players and in the Android version
     pub fn toggle_repeat(&mut self) {
-        self.repeat_mode = (self.repeat_mode + 1) % 3;
+        self.repeat_mode = match self.repeat_mode {
+            REPEAT_OFF => REPEAT_ALL,
+            REPEAT_ALL => REPEAT_ONE,
+            _ => REPEAT_OFF,
+        };
+    }
+
+    /// Takes effect with the next `set_tracks`.
+    pub fn set_shuffle(&mut self, shuffle: bool) {
+        self.shuffle = shuffle;
     }
 
     /// Moves to the next track. `None` means the queue has nothing more to play.
@@ -185,7 +195,6 @@ mod tests {
     fn next_wraps_around_when_repeat_all_is_on() {
         let mut queue = queue_of(2, 1);
         queue.toggle_repeat();
-        queue.toggle_repeat();
         assert_eq!(queue.repeat_mode(), REPEAT_ALL);
         assert_eq!(next_path(&mut queue).as_deref(), Some("track1.mp3"));
         assert_eq!(next_path(&mut queue).as_deref(), Some("track0.mp3"));
@@ -207,7 +216,6 @@ mod tests {
     #[test]
     fn previous_wraps_to_the_last_track_when_repeat_all_is_on() {
         let mut queue = queue_of(3, 1);
-        queue.toggle_repeat();
         queue.toggle_repeat();
         assert_eq!(queue.previous().unwrap().file_path, "track2.mp3");
     }
@@ -245,7 +253,6 @@ mod tests {
             let mut queue = queue_of(3, seed);
             queue.toggle_shuffle();
             queue.toggle_repeat();
-            queue.toggle_repeat();
 
             let mut previous = "track0.mp3".to_string();
             for _ in 0..30 {
@@ -260,7 +267,6 @@ mod tests {
     fn shuffle_with_repeat_all_replays_a_single_track() {
         let mut queue = queue_of(1, 1);
         queue.toggle_shuffle();
-        queue.toggle_repeat();
         queue.toggle_repeat();
         assert_eq!(next_path(&mut queue).as_deref(), Some("track0.mp3"));
     }
@@ -305,6 +311,30 @@ mod tests {
         assert_eq!(queue.version(), start + 1);
         queue.set_tracks(vec![track(5)], 0);
         assert_eq!(queue.version(), start + 2);
+    }
+
+    #[test]
+    fn repeat_mode_cycles_off_all_one_off() {
+        let mut queue = queue_of(2, 1);
+        let mut seen = vec![queue.repeat_mode()];
+        for _ in 0..3 {
+            queue.toggle_repeat();
+            seen.push(queue.repeat_mode());
+        }
+        assert_eq!(seen, [REPEAT_OFF, REPEAT_ALL, REPEAT_ONE, REPEAT_OFF]);
+    }
+
+    #[test]
+    fn play_all_without_shuffle_does_not_keep_the_earlier_shuffle() {
+        let mut queue = queue_of(4, 3);
+        queue.toggle_shuffle();
+
+        queue.set_shuffle(false);
+        queue.set_tracks((0..4).map(track).collect(), 0);
+
+        assert!(!queue.shuffle());
+        let played: Vec<_> = std::iter::from_fn(|| next_path(&mut queue)).collect();
+        assert_eq!(played, ["track1.mp3", "track2.mp3", "track3.mp3"]);
     }
 
     #[test]
