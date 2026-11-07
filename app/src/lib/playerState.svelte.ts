@@ -1,4 +1,5 @@
 import { folderResumePoint } from "./albumResume";
+import { stepSpeed } from "./speed";
 import { type FontScaleId, fontScaleFromId, stepFontScale, zoomOf } from "./fontScale";
 import { api } from "./api";
 import type {
@@ -103,6 +104,7 @@ class PlayerStore {
     shuffle_mode: false,
     repeat_mode: 0,
     queue_version: 0,
+    speed: 1,
   });
   queue = $state<AudioTrack[]>([]);
 
@@ -496,6 +498,17 @@ class PlayerStore {
     } catch (e) {
       this.showError(String(e));
     }
+  }
+
+  async setPlaybackSpeed(speed: number) {
+    await this.attempt(async () => {
+      const applied = await api.setPlaybackSpeed(speed);
+      this.playback = { ...this.playback, speed: applied };
+    });
+  }
+
+  async stepPlaybackSpeed(step: 1 | -1) {
+    await this.setPlaybackSpeed(stepSpeed(this.playback.speed, step));
   }
 
   async togglePlayPause() {

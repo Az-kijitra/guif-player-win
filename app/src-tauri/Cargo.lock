@@ -1394,6 +1394,7 @@ dependencies = [
  "tempfile",
  "walkdir",
  "windows-sys 0.59.0",
+ "wsola",
 ]
 
 [[package]]
@@ -5003,6 +5004,15 @@ dependencies = [
  "windows-core 0.62.2",
  "windows-version",
  "x11-dl",
+]
+
+[[package]]
+name = "wsola"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8149cd82a73bbde439d2b42a40a032de7dc28b1ec01919fcd0bd0456ecea75e6"
+dependencies = [
+ "thiserror 2.0.21",
 ]
 
 [[package]]

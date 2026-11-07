@@ -60,6 +60,15 @@
       ) {
         e.preventDefault();
         playerState.addBookmark();
+      } else if (
+        (e.key === "[" || e.key === "]") &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey &&
+        !isTextInput
+      ) {
+        e.preventDefault();
+        playerState.stepPlaybackSpeed(e.key === "]" ? 1 : -1);
       } else if (e.key === " " && !e.ctrlKey && !isTextInput) {
         e.preventDefault();
         playerState.togglePlayPause();

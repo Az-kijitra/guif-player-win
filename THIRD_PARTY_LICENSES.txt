@@ -11091,3 +11091,4 @@ symphonia-utils-xiph 0.5.5: MPL-2.0
 webview2-com 0.39.1: MIT
 webview2-com-macros 0.8.1: MIT
 webview2-com-sys 0.39.1: MIT
+wsola 0.3.0: MIT

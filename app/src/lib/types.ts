@@ -41,6 +41,7 @@ export interface PlaybackState {
   shuffle_mode: boolean;
   repeat_mode: number; // 0 = off, 1 = one, 2 = all
   queue_version: number;
+  speed: number;
 }
 
 export interface AlbumResume {

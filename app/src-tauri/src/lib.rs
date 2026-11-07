@@ -5,6 +5,7 @@ pub mod player;
 pub mod queue;
 pub mod resume;
 pub mod scanner;
+pub mod speed;
 #[cfg(test)]
 mod test_audio;
 
@@ -407,6 +408,37 @@ fn delete_bookmark(state: State<'_, AppState>, file_path: String) -> Result<(), 
         .map_err(|e| e.to_string())
 }
 
+// ----------------------------------------------------
+// Playback speed
+// ----------------------------------------------------
+
+fn saved_playback_speed(db: &Database) -> f32 {
+    db.get_setting("playback_speed")
+        .ok()
+        .flatten()
+        .and_then(|value| value.parse::<f32>().ok())
+        .map(speed::normalize_speed)
+        .unwrap_or(1.0)
+}
+
+fn save_playback_speed(db: &Database, speed: f32) -> Result<f32, String> {
+    let speed = speed::normalize_speed(speed);
+    db.set_setting("playback_speed", &speed.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(speed)
+}
+
+/// One speed for the whole app: it carries over to the next track and the next start.
+#[tauri::command]
+async fn set_playback_speed(state: State<'_, AppState>, speed: f32) -> Result<f32, String> {
+    with_player(state, move |player, db| {
+        let speed = save_playback_speed(db, speed)?;
+        player.set_speed(speed);
+        Ok(speed)
+    })
+    .await?
+}
+
 #[tauri::command]
 async fn find_missing_files(paths: Vec<String>) -> Result<Vec<String>, String> {
     run_blocking(move || scanner::missing_files(&paths)).await
@@ -621,6 +653,8 @@ pub fn run() {
         }
     };
 
+    player.lock().unwrap().set_speed(saved_playback_speed(&db));
+
     let player_clone = Arc::clone(&player);
     let db_clone = Arc::clone(&db);
 
@@ -727,6 +761,7 @@ pub fn run() {
             get_playlist_tracks,
             remove_from_playlist,
             find_missing_files,
+            set_playback_speed,
             add_bookmark,
             get_bookmarks,
             delete_bookmark,
@@ -788,6 +823,19 @@ mod command_tests {
 
         assert!(bookmark_current_track(&mut player, &db).is_err());
         assert!(db.get_bookmarks().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_chosen_speed_is_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open_at(&dir.path().join("a.db")).unwrap();
+        assert_eq!(saved_playback_speed(&db), 1.0, "speed defaults to normal");
+
+        assert_eq!(save_playback_speed(&db, 1.45).unwrap(), 1.4);
+
+        assert_eq!(saved_playback_speed(&db), 1.4);
+        db.set_setting("playback_speed", "fast").unwrap();
+        assert_eq!(saved_playback_speed(&db), 1.0);
     }
 
     #[test]

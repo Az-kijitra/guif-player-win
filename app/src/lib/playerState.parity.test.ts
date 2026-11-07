@@ -13,6 +13,7 @@ vi.mock("./api", () => ({
     getPlaylistTracks: vi.fn(async () => []),
     addToPlaylist: vi.fn(async () => undefined),
     findMissingFiles: vi.fn(async () => []),
+    setPlaybackSpeed: vi.fn(async (speed: number) => speed),
     getAlbumResume: vi.fn(async () => null),
   },
 }));
@@ -106,6 +107,16 @@ describe("resuming a folder", () => {
     };
     await playerState.playAlbumFromBeginning(tracks);
     expect(mocked.playQueue).toHaveBeenCalledWith(tracks, 0, 0, undefined);
+  });
+});
+
+describe("playback speed", () => {
+  it("the speed is sent to the player and shown at once", async () => {
+    await playerState.setPlaybackSpeed(1.4);
+    expect(mocked.setPlaybackSpeed).toHaveBeenLastCalledWith(1.4);
+    expect(playerState.playback.speed).toBe(1.4);
+    await playerState.stepPlaybackSpeed(1);
+    expect(mocked.setPlaybackSpeed).toHaveBeenLastCalledWith(1.6);
   });
 });
 

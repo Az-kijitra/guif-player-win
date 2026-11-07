@@ -323,6 +323,7 @@ guif-player 本体のライセンスは [MIT License](LICENSE) です。配布�
 | winreg | 0.56.0 | MIT | https://github.com/gentoo90/winreg-rs |
 | writeable | 0.6.4 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | wry | 0.57.1 | Apache-2.0 OR MIT | https://github.com/tauri-apps/wry |
+| wsola | 0.3.0 | MIT | https://github.com/jhheider/pdcst |
 | yoke | 0.8.4 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | yoke-derive | 0.8.4 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | zerocopy | 0.8.63 | BSD-2-Clause OR Apache-2.0 OR MIT | https://github.com/google/zerocopy |

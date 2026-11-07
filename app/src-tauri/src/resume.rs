@@ -63,6 +63,7 @@ mod tests {
             shuffle_mode: false,
             repeat_mode: 0,
             queue_version: 0,
+            speed: 1.0,
         }
     }
 

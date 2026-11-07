@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { PLAYBACK_SPEEDS, formatSpeed } from "../speed";
   import { formatTime, playerState } from "../playerState.svelte";
 
   let track = $derived(playerState.playback.current_track);
@@ -124,6 +125,18 @@
               {playerState.playback.repeat_mode === 1 ? "🔂" : "🔁"}
             </button>
           </div>
+          <div class="extra-controls">
+          <label class="speed-select" title="再生速度 ([ で遅く、] で速く)">
+            速度
+            <select
+              value={playerState.playback.speed}
+              onchange={(e) => playerState.setPlaybackSpeed(Number((e.target as HTMLSelectElement).value))}
+            >
+              {#each PLAYBACK_SPEEDS as speed}
+                <option value={speed}>{formatSpeed(speed)}</option>
+              {/each}
+            </select>
+          </label>
           <button
             class="bookmark-btn"
             class:has-bookmark={hasBookmark}
@@ -132,6 +145,7 @@
           >
             {hasBookmark ? "★" : "☆"} しおり
           </button>
+          </div>
         </div>
 
         <!-- Right: Playback Queue -->
@@ -177,8 +191,32 @@
 {/if}
 
 <style>
-  .bookmark-btn {
+  .extra-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
     margin-top: 12px;
+  }
+
+  .speed-select {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--nord4);
+  }
+
+  .speed-select select {
+    padding: 3px 6px;
+    color: var(--nord4);
+    background: var(--nord1);
+    border: 1px solid var(--nord3);
+    border-radius: 3px;
+    font-family: inherit;
+  }
+
+  .bookmark-btn {
     padding: 4px 14px;
     border: 1px solid var(--nord3);
     border-radius: 3px;

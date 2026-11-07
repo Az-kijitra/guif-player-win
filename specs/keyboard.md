@@ -17,5 +17,5 @@
 | K-11 | フォーカスのある行が見える | 手動 |
 | K-12 | 補助的な文字が全テーマで読める | `is readable on the panels of %s` |
 | K-13 | `B` で今の位置にしおりを挟む | 手動 |
-| K-14 | `[` と `]` で再生速度を 1 段階ずつ変える | 計画(段階 E) |
+| K-14 | `[` と `]` で再生速度を 1 段階ずつ変える | `the speed keys move one step at a time and stop at both ends`、手動 |
 | K-15 | `Ctrl+=`、`Ctrl+-`、`Ctrl+0` で文字の大きさを変え、標準に戻す | `zoom keys step through the sizes and stop at both ends`、`the zoom keys move one size at a time` |

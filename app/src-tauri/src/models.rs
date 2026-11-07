@@ -49,6 +49,7 @@ pub struct PlaybackStateDto {
     pub repeat_mode: u8, // 0 = off, 1 = one, 2 = all
     // This goes out several times a second, so it carries a version instead of the queue itself
     pub queue_version: u64,
+    pub speed: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,5 +1,6 @@
 use crate::models::{AudioTrack, PlaybackStateDto};
 use crate::queue::{PlayQueue, REPEAT_ONE};
+use crate::speed::{SharedSpeed, SpeedSource};
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -412,6 +413,7 @@ pub struct AudioPlayer {
     elapsed_before_pause: Duration,
     volume: f32,
     failed_in_a_row: usize,
+    speed: SharedSpeed,
 }
 
 pub type SharedPlayer = Arc<Mutex<AudioPlayer>>;
@@ -463,6 +465,7 @@ impl AudioPlayer {
             elapsed_before_pause: Duration::ZERO,
             volume: 1.0,
             failed_in_a_row: 0,
+            speed: SharedSpeed::new(1.0),
         }
     }
 
@@ -491,7 +494,7 @@ impl AudioPlayer {
         let sink =
             Sink::try_new(handle).map_err(|e| format!("音声の出力を開始できません: {}", e))?;
         sink.set_volume(self.volume);
-        sink.append(source);
+        sink.append(SpeedSource::new(source, self.speed.clone()));
 
         // Now safely stop the old sink
         if let Some(s) = self.sink.take() {
@@ -548,7 +551,7 @@ impl AudioPlayer {
             } else if self.is_playing {
                 sink.pause();
                 if let Some(st) = self.start_time {
-                    self.elapsed_before_pause += st.elapsed();
+                    self.elapsed_before_pause += self.media_time(st.elapsed());
                 }
                 self.start_time = None;
                 self.is_paused = true;
@@ -563,7 +566,7 @@ impl AudioPlayer {
             if self.is_playing && !self.is_paused {
                 sink.pause();
                 if let Some(st) = self.start_time {
-                    self.elapsed_before_pause += st.elapsed();
+                    self.elapsed_before_pause += self.media_time(st.elapsed());
                 }
                 self.start_time = None;
                 self.is_paused = true;
@@ -671,9 +674,27 @@ impl AudioPlayer {
         self.queue.toggle_repeat();
     }
 
+    /// Wall-clock time turned into time in the track
+    fn media_time(&self, wall: Duration) -> Duration {
+        wall.mul_f32(self.speed.get())
+    }
+
+    pub fn speed(&self) -> f32 {
+        self.speed.get()
+    }
+
+    /// Applies to the track playing at once. The position so far is kept at the old speed.
+    pub fn set_speed(&mut self, speed: f32) {
+        if let Some(st) = self.start_time {
+            self.elapsed_before_pause += self.media_time(st.elapsed());
+            self.start_time = Some(Instant::now());
+        }
+        self.speed.set(speed);
+    }
+
     pub fn get_position_ms(&self) -> u64 {
         if let Some(st) = self.start_time {
-            let running = st.elapsed();
+            let running = self.media_time(st.elapsed());
             (self.elapsed_before_pause + running).as_millis() as u64
         } else {
             self.elapsed_before_pause.as_millis() as u64
@@ -706,6 +727,7 @@ impl AudioPlayer {
             shuffle_mode: self.queue.shuffle(),
             repeat_mode: self.queue.repeat_mode(),
             queue_version: self.queue.version(),
+            speed: self.speed.get(),
         }
     }
 
@@ -917,6 +939,26 @@ mod tests {
         player.is_playing = true;
         player.start_time = Some(Instant::now());
         player
+    }
+
+    #[test]
+    fn the_position_advances_at_the_chosen_speed() {
+        let mut player = AudioPlayer::playing_for_tests(track("a.mp3"), Duration::from_secs(10));
+        let at = |p: &AudioPlayer| p.get_position_ms() / 1000;
+        assert_eq!(at(&player), 10);
+
+        player.set_speed(2.0);
+        player.start_time = Instant::now().checked_sub(Duration::from_secs(4));
+        assert_eq!(at(&player), 18, "ten seconds, then four at double speed");
+
+        player.pause();
+        assert_eq!(at(&player), 18, "a pause keeps the position");
+        player.set_speed(1.0);
+        assert_eq!(
+            at(&player),
+            18,
+            "changing the speed while paused moves nothing"
+        );
     }
 
     #[test]

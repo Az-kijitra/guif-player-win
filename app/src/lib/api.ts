@@ -42,6 +42,7 @@ export const api = {
   toggleRepeat: () => invoke<number>("toggle_repeat"),
   getPlaybackState: () => invoke<PlaybackState>("get_playback_state"),
   getQueue: () => invoke<AudioTrack[]>("get_queue"),
+  setPlaybackSpeed: (speed: number) => invoke<number>("set_playback_speed", { speed }),
 
   // Resumes
   saveAlbumResume: (albumPath: string, lastFilePath: string, positionMs: number) =>
