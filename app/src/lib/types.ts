@@ -46,6 +46,13 @@ export interface PlaybackState {
   speed: number;
 }
 
+/** An album opened in the album view: its tracks and where it was left off. */
+export interface OpenedAlbum {
+  album: AlbumSummary;
+  tracks: AudioTrack[];
+  resume: AlbumResume | null;
+}
+
 export interface AlbumResume {
   album_path: string;
   last_file_path: string;

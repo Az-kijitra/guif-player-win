@@ -74,11 +74,16 @@
         playerState.togglePlayPause();
       } else if (
         (e.key === "Backspace" || (e.altKey && e.key === "ArrowUp")) &&
-        playerState.viewMode === "FOLDER" &&
+        (playerState.viewMode === "FOLDER" || playerState.viewMode === "ARTWORK") &&
         !isTextInput
       ) {
         e.preventDefault();
-        playerState.navigateUp();
+        if (playerState.openedAlbum) {
+          // In the album view, back from an album's tracks to the grid first
+          playerState.closeAlbum();
+        } else {
+          playerState.navigateUp();
+        }
       } else if (
         (e.key === "ArrowDown" || e.key === "ArrowUp") &&
         activeEl === document.body &&
@@ -126,6 +131,8 @@
           playerState.playlistModalTrack = null;
         } else if (playerState.errorMessage) {
           playerState.clearError();
+        } else if (playerState.openedAlbum && playerState.viewMode === "ARTWORK") {
+          playerState.closeAlbum();
         } else {
           // Back to the list from the inspector or the header
           focusActiveNavItem();

@@ -19,3 +19,4 @@
 | K-13 | `B` で今の位置にしおりを挟む | 手動 |
 | K-14 | `[` と `]` で再生速度を 1 段階ずつ変える | `the speed keys move one step at a time and stop at both ends`、手動 |
 | K-15 | `Ctrl+=`、`Ctrl+-`、`Ctrl+0` で文字の大きさを変え、標準に戻す | `zoom keys step through the sizes and stop at both ends`、`the zoom keys move one size at a time` |
+| K-16 | アルバムビューでは、`Backspace` と `Esc` でアルバムの曲の一覧を閉じ、一覧がなければ `Backspace` で親フォルダーへ戻る。曲の一覧では上下で行を移動し、`Enter` で再生する | 手動 |

@@ -54,9 +54,10 @@ P-8 は Windows 版だけの基準です。Android 版のシャッフル再生�
 | P-45 | 再読込は覚えていた結果を使わずに読み直す | `a refresh reads the folder again without the remembered result` |
 | P-46 | アルバムビューでフォルダーを移動すると(パスのボタン、ドライブ、上へ)、移動先のアルバムを表示する | `the album view lists the albums of the folder it moves to`、`the folder view does not look for albums` |
 | P-47 | アルバムビューは今のフォルダーの直下を名前順に並べる。曲のあるフォルダーはアルバム、曲のないフォルダーはフォルダーとして表示する。今のフォルダーに曲があれば、先頭にアルバムとして表示する | `the_album_view_lists_what_is_directly_inside`、`a_folder_with_tracks_shows_itself_first` |
-| P-48 | アルバムビューでフォルダーを開くとアルバムビューのまま中へ移動し、アルバムを開くとフォルダービューでそのフォルダーを表示する | `opening a folder in the album view stays in the album view`、`opening an album shows its folder in the folder view` |
+| P-48 | アルバムビューでフォルダーを開くとアルバムビューのまま中へ移動し、アルバムを開くとアルバムビューのままその曲の一覧を表示する。開いたアルバムの曲はすべて選択され、プロパティに表示される(タグの編集は一覧にすぐ反映する)。一覧からフォルダービューでも開ける | `opening a folder in the album view stays in the album view`、`opening an album shows its tracks in the album view`、`the properties follow the opened album`、`tags edited in the properties show in the opened album`、`the folder button opens the album in the folder view` |
+| P-49 | アルバムの曲の一覧から、続きから(フォルダービューと同じ規則)、最初から、シャッフル、曲を選んで再生できる。戻る、移動する、ほかのビューへ切り替えると一覧を閉じる | `an opened album plays from where it was left off`、`going back, moving or leaving the album view closes the album`、手動 |
 
-P-43 は Android 版の文書プロバイダーに関する基準なので、Windows 版にはありません。P-46〜P-48 は Windows 版だけの基準です(Android 版にアルバムビューはありません)。
+P-43 は Android 版の文書プロバイダーに関する基準なので、Windows 版にはありません。P-46〜P-49 は Windows 版だけの基準です(Android 版にアルバムビューはありません)。
 
 ## 再生速度
 

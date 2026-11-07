@@ -9,6 +9,7 @@
   } from "../listNavigation";
   import { playerState } from "../playerState.svelte";
   import type { AlbumSummary } from "../types";
+  import AlbumDetailView from "./AlbumDetailView.svelte";
 
   let albums = $derived(playerState.albums);
   let artworkCache = $state<Record<string, string | null>>({});
@@ -69,7 +70,9 @@
 </script>
 
 <div class="artwork-grid-view">
-  {#if albums.length === 0 && playerState.isLoadingAlbums}
+  {#if playerState.openedAlbum}
+    <AlbumDetailView opened={playerState.openedAlbum} />
+  {:else if albums.length === 0 && playerState.isLoadingAlbums}
     <div class="empty-state">読み込み中…</div>
   {:else if albums.length === 0}
     <div class="empty-state">

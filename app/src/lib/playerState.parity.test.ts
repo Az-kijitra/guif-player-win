@@ -16,12 +16,13 @@ vi.mock("./api", () => ({
     setPlaybackSpeed: vi.fn(async (speed: number) => speed),
     getAlbumResume: vi.fn(async () => null),
     listAlbums: vi.fn(async () => []),
+    updateTracksMetadata: vi.fn(),
   },
 }));
 
 import { api } from "./api";
 import { playerState } from "./playerState.svelte";
-import type { AlbumSummary, AudioTrack, FolderContent, TrackResume } from "./types";
+import type { AlbumResume, AlbumSummary, AudioTrack, FolderContent, TrackResume } from "./types";
 
 const mocked = vi.mocked(api);
 const track = (n: number) => ({ file_path: `C:\\Music\\${n}.mp3` }) as AudioTrack;
@@ -97,23 +98,101 @@ describe("moving to another folder", () => {
     await vi.waitFor(() => expect(mocked.listAlbums).toHaveBeenLastCalledWith("D:\\Music\\Rock"));
   });
 
-  it("opening an album shows its folder in the folder view", async () => {
-    mocked.listFolder.mockImplementation(async (path: string) => folder(path));
-    playerState.setViewMode("ARTWORK");
-    mocked.listAlbums.mockClear();
-    await playerState.openAlbumViewItem({
-      folder_path: "D:\\Music\\Rock\\Loud",
-      is_folder: false,
-    } as AlbumSummary);
-    expect(playerState.viewMode).toBe("FOLDER");
-    expect(playerState.currentPath).toBe("D:\\Music\\Rock\\Loud");
-    expect(mocked.listAlbums).not.toHaveBeenCalled();
-  });
-
   it("the folder view does not look for albums", async () => {
     mocked.listFolder.mockImplementation(async (path: string) => folder(path));
     playerState.setViewMode("FOLDER");
     await playerState.navigateTo("D:\\Music\\Rock");
+    expect(mocked.listAlbums).not.toHaveBeenCalled();
+  });
+});
+
+describe("an album opened in the album view", () => {
+  const loud = { folder_path: "D:\\Music\\Rock\\Loud", is_folder: false } as AlbumSummary;
+  const albumFolder = (path: string): FolderContent =>
+    ({
+      current_path: path,
+      parent_path: null,
+      items: tracks.slice(0, 3).map((t) => ({ name: t.file_path, track: t })),
+    }) as FolderContent;
+  const resume: AlbumResume = {
+    album_path: loud.folder_path,
+    last_file_path: tracks[1].file_path,
+    position_ms: 42_000,
+    updated_at: 0,
+  };
+
+  beforeEach(async () => {
+    mocked.listFolder.mockImplementation(async (path: string) => albumFolder(path));
+    mocked.getAlbumResume.mockResolvedValue(resume);
+    await playerState.navigateTo("D:\\Music\\Rock");
+    playerState.setViewMode("ARTWORK");
+    mocked.listAlbums.mockClear();
+  });
+
+  it("opening an album shows its tracks in the album view", async () => {
+    await playerState.openAlbumViewItem(loud);
+    expect(playerState.viewMode).toBe("ARTWORK");
+    expect(playerState.currentPath).toBe("D:\\Music\\Rock");
+    expect(playerState.openedAlbum?.tracks).toEqual(tracks.slice(0, 3));
+    expect(playerState.openedAlbum?.resume).toEqual(resume);
+    expect(mocked.getAlbumResume).toHaveBeenCalledWith(loud.folder_path);
+    expect(mocked.listAlbums).not.toHaveBeenCalled();
+  });
+
+  it("an opened album plays from where it was left off", async () => {
+    await playerState.openAlbumViewItem(loud);
+    const opened = playerState.openedAlbum!;
+    await playerState.playAlbumResume(opened.tracks, opened.resume);
+    expect(mocked.playQueue).toHaveBeenCalledWith(opened.tracks, 1, 42_000, undefined);
+  });
+
+  it("going back, moving or leaving the album view closes the album", async () => {
+    await playerState.openAlbumViewItem(loud);
+    playerState.closeAlbum();
+    expect(playerState.openedAlbum).toBeNull();
+
+    await playerState.openAlbumViewItem(loud);
+    await playerState.navigateTo("D:\\Music");
+    expect(playerState.openedAlbum).toBeNull();
+
+    await playerState.openAlbumViewItem(loud);
+    playerState.setViewMode("ARTWORK");
+    expect(playerState.openedAlbum).not.toBeNull();
+    playerState.setViewMode("FOLDER");
+    expect(playerState.openedAlbum).toBeNull();
+  });
+
+  it("the properties follow the opened album", async () => {
+    playerState.selectSingleTrack(tracks[3]);
+    await playerState.openAlbumViewItem(loud);
+    expect(playerState.selectedTracks).toEqual(tracks.slice(0, 3));
+
+    playerState.closeAlbum();
+    expect(playerState.selectedTracks).toEqual([]);
+
+    await playerState.openAlbumViewItem(loud);
+    await playerState.openAlbumInFolderView(loud);
+    expect(playerState.selectedTracks).toEqual(tracks.slice(0, 3));
+  });
+
+  it("tags edited in the properties show in the opened album", async () => {
+    await playerState.openAlbumViewItem(loud);
+    const renamed = { ...tracks[0], title: "New title", album: "New album" };
+    mocked.updateTracksMetadata.mockResolvedValue({ updated: [renamed], failed: [] });
+    mocked.listAlbums.mockResolvedValue([{ ...loud, album_name: "New album" }]);
+
+    await playerState.updateTracksMetadata({ file_paths: [renamed.file_path] } as never);
+
+    expect(playerState.openedAlbum?.tracks[0].title).toBe("New title");
+    expect(playerState.openedAlbum?.album.album_name).toBe("New album");
+    expect(playerState.selectedTracks[0].title).toBe("New title");
+  });
+
+  it("the folder button opens the album in the folder view", async () => {
+    await playerState.openAlbumViewItem(loud);
+    await playerState.openAlbumInFolderView(loud);
+    expect(playerState.viewMode).toBe("FOLDER");
+    expect(playerState.currentPath).toBe(loud.folder_path);
     expect(mocked.listAlbums).not.toHaveBeenCalled();
   });
 });
@@ -251,5 +330,21 @@ describe("playlists", () => {
 
     expect(playerState.errorMessage).toContain("見つからない曲が 2 曲あります");
     expect([...playerState.missingPlaylistPaths]).toEqual([tracks[1].file_path, tracks[4].file_path]);
+  });
+});
+
+describe("keeping in step with the player", () => {
+  it("with nothing loaded, the resume points are not read again on every poll", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", globalThis);
+    try {
+      playerState.startSync();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(mocked.getAllTrackResumes.mock.calls.length).toBeLessThanOrEqual(1);
+    } finally {
+      clearInterval((playerState as unknown as { syncInterval: number }).syncInterval);
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 });

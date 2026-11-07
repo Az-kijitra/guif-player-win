@@ -6,6 +6,7 @@ import type {
   AlbumResume,
   Bookmark,
   AlbumSummary,
+  OpenedAlbum,
   AudioTrack,
   FolderContent,
   PlaybackState,
@@ -119,6 +120,9 @@ class PlayerStore {
   // Where the open folder was left off, for its "resume" button
   albumResume = $state<AlbumResume | null>(null);
   private latestAlbumRequest = 0;
+  private latestOpenedAlbumRequest = 0;
+  /** The album whose tracks the album view shows, instead of the grid */
+  openedAlbum = $state<OpenedAlbum | null>(null);
 
   errorMessage = $state<string | null>(null);
   // "error" for failures, "info" for confirmations such as a bookmark being made
@@ -210,8 +214,10 @@ class PlayerStore {
         }
         this.wasPlaying = state.is_playing;
 
-        if (state.current_track?.file_path !== this.lastArtworkTrackPath) {
-          this.lastArtworkTrackPath = state.current_track?.file_path ?? null;
+        // ?? null: with no track, undefined must not count as a change on every poll
+        const trackPath = state.current_track?.file_path ?? null;
+        if (trackPath !== this.lastArtworkTrackPath) {
+          this.lastArtworkTrackPath = trackPath;
           // A new track moves the resume point and the marks in the list
           void this.loadResumes();
           if (state.current_track) {
@@ -239,6 +245,7 @@ class PlayerStore {
 
   async navigateTo(path: string, { useCache = true } = {}) {
     const request = ++this.latestFolderRequest;
+    this.closeAlbum();
     const cached = useCache ? this.folderCache.get(path) : undefined;
     if (cached) {
       this.currentPath = path;
@@ -407,6 +414,13 @@ class PlayerStore {
       if (folder === this.currentPath) {
         this.albumResume = albumResume;
       }
+      const opened = this.openedAlbum;
+      if (opened) {
+        const resume = await api.getAlbumResume(opened.album.folder_path);
+        if (this.openedAlbum === opened) {
+          this.openedAlbum = { ...opened, resume };
+        }
+      }
     } catch (e) {
       this.reportError("再生位置を読み込めません", e);
     }
@@ -481,9 +495,9 @@ class PlayerStore {
   }
 
   /** The folder's tracks from where the album was left off (see albumResume.ts). */
-  async playAlbumResume(tracks: AudioTrack[]) {
+  async playAlbumResume(tracks: AudioTrack[], albumResume: AlbumResume | null = this.albumResume) {
     if (tracks.length === 0) return;
-    const point = folderResumePoint(tracks, this.albumResume, this.trackResumes) ?? { index: 0, positionMs: 0 };
+    const point = folderResumePoint(tracks, albumResume, this.trackResumes) ?? { index: 0, positionMs: 0 };
     await this.startQueue(tracks, point.index, undefined, point.positionMs);
   }
 
@@ -543,16 +557,61 @@ class PlayerStore {
     await api.toggleRepeat();
   }
 
-  /** A card of the album view: a folder opens in the album view, an album in the folder view. */
+  /** A card of the album view: a folder is entered, an album shows its tracks. */
   async openAlbumViewItem(item: AlbumSummary) {
-    if (!item.is_folder) {
-      // Switching first, so the album's folder is not scanned for albums
-      this.setViewMode("FOLDER");
+    if (item.is_folder) {
+      await this.navigateTo(item.folder_path);
+    } else {
+      await this.openAlbum(item);
     }
-    await this.navigateTo(item.folder_path);
+  }
+
+  /** Shows the album's tracks in the album view, with where it was left off. */
+  async openAlbum(album: AlbumSummary) {
+    const request = ++this.latestOpenedAlbumRequest;
+    try {
+      const [content, resume] = await Promise.all([
+        api.listFolder(album.folder_path),
+        api.getAlbumResume(album.folder_path),
+      ]);
+      if (request !== this.latestOpenedAlbumRequest) return;
+      this.rememberFolder(content);
+      const tracks = content.items.filter((i) => i.track !== null).map((i) => i.track as AudioTrack);
+      this.openedAlbum = { album, tracks, resume };
+      // The properties follow the album: all its tracks, to edit its tags at once
+      this.selectAllTracks(tracks);
+    } catch (e) {
+      if (request === this.latestOpenedAlbumRequest) {
+        this.reportError("アルバムを開けません", e);
+      }
+    }
+  }
+
+  /** Back from an album's tracks to the album grid. */
+  closeAlbum() {
+    this.latestOpenedAlbumRequest++;
+    if (this.openedAlbum) {
+      // Its tracks are no longer on screen, so the properties no longer show them
+      this.clearSelection();
+    }
+    this.openedAlbum = null;
+  }
+
+  /** The album's folder in the folder view (switching first, so it is not scanned for albums). */
+  async openAlbumInFolderView(album: AlbumSummary) {
+    // The same tracks stay selected in the folder view
+    const selected = this.selectedTracks;
+    const last = this.lastSelectedPath;
+    this.setViewMode("FOLDER");
+    this.selectedTracks = selected;
+    this.lastSelectedPath = last;
+    await this.navigateTo(album.folder_path);
   }
 
   setViewMode(mode: ViewMode) {
+    if (mode !== "ARTWORK") {
+      this.closeAlbum();
+    }
     this.viewMode = mode;
     if (mode === "ARTWORK") {
       this.loadAlbums();
@@ -659,6 +718,14 @@ class PlayerStore {
     }
     if (this.viewMode === "ARTWORK" && this.currentPath) {
       this.albums = await api.listAlbums(this.currentPath);
+    }
+    const opened = this.openedAlbum;
+    if (opened) {
+      const album = this.albums.find((a) => a.folder_path === opened.album.folder_path) ?? opened.album;
+      const tracks = opened.tracks.map((t) => updatedMap.get(t.file_path) ?? t);
+      if (this.openedAlbum === opened) {
+        this.openedAlbum = { ...opened, album, tracks };
+      }
     }
     if (this.activePlaylistId !== null) {
       this.playlistTracks = await api.getPlaylistTracks(this.activePlaylistId);
