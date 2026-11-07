@@ -13,6 +13,7 @@ vi.mock("./api", () => ({
     getPlaylistTracks: vi.fn(async () => []),
     addToPlaylist: vi.fn(async () => undefined),
     findMissingFiles: vi.fn(async () => []),
+    getAlbumResume: vi.fn(async () => null),
   },
 }));
 
@@ -65,6 +66,22 @@ describe("playing a whole list", () => {
     };
     await playerState.playTrackInList(tracks[2], tracks);
     expect(mocked.playQueue).toHaveBeenCalledWith(tracks, 2, 0, undefined);
+  });
+});
+
+describe("resuming a folder", () => {
+  it("plays the folder from where it was left off", async () => {
+    playerState.albumResume = { album_path: "C:\\Music", last_file_path: tracks[3].file_path, position_ms: 61_000, updated_at: 1 };
+    await playerState.playAlbumResume(tracks);
+    expect(mocked.playQueue).toHaveBeenCalledWith(tracks, 3, 61_000, undefined);
+  });
+
+  it("plays the folder from the first track at its start", async () => {
+    playerState.trackResumes = {
+      [tracks[0].file_path]: { position_ms: 42_000, is_completed: false } as TrackResume,
+    };
+    await playerState.playAlbumFromBeginning(tracks);
+    expect(mocked.playQueue).toHaveBeenCalledWith(tracks, 0, 0, undefined);
   });
 });
 

@@ -1,5 +1,7 @@
+import { folderResumePoint } from "./albumResume";
 import { api } from "./api";
 import type {
+  AlbumResume,
   AlbumSummary,
   AudioTrack,
   FolderContent,
@@ -100,6 +102,8 @@ class PlayerStore {
   private latestFolderRequest = 0;
   private folderCache = new Map<string, FolderContent>();
   missingPlaylistPaths = $state<Set<string>>(new Set());
+  // Where the open folder was left off, for its "resume" button
+  albumResume = $state<AlbumResume | null>(null);
   private latestAlbumRequest = 0;
 
   errorMessage = $state<string | null>(null);
@@ -107,6 +111,7 @@ class PlayerStore {
 
   private syncInterval: number | null = null;
   private lastArtworkTrackPath: string | null = null;
+  private wasPlaying = false;
 
   showError(message: string) {
     if (this.errorTimer) clearTimeout(this.errorTimer);
@@ -172,8 +177,16 @@ class PlayerStore {
       try {
         const state = await this.refreshPlayback();
 
+        // Stopping saves the position: show it in the list and in the resume button
+        if (this.wasPlaying && !state.is_playing) {
+          void this.loadResumes();
+        }
+        this.wasPlaying = state.is_playing;
+
         if (state.current_track?.file_path !== this.lastArtworkTrackPath) {
           this.lastArtworkTrackPath = state.current_track?.file_path ?? null;
+          // A new track moves the resume point and the marks in the list
+          void this.loadResumes();
           if (state.current_track) {
             this.currentArtwork = await api.getArtwork(state.current_track.file_path);
           } else {
@@ -357,6 +370,11 @@ class PlayerStore {
         map[item.file_path] = item;
       }
       this.trackResumes = map;
+      const folder = this.currentPath;
+      const albumResume = folder ? await api.getAlbumResume(folder) : null;
+      if (folder === this.currentPath) {
+        this.albumResume = albumResume;
+      }
     } catch (e) {
       this.reportError("再生位置を読み込めません", e);
     }
@@ -374,10 +392,23 @@ class PlayerStore {
     await this.startQueue(tracks, start, shuffle);
   }
 
-  private async startQueue(tracks: AudioTrack[], index: number, shuffle?: boolean) {
+  /** The folder's tracks from where the album was left off (see albumResume.ts). */
+  async playAlbumResume(tracks: AudioTrack[]) {
+    if (tracks.length === 0) return;
+    const point = folderResumePoint(tracks, this.albumResume, this.trackResumes) ?? { index: 0, positionMs: 0 };
+    await this.startQueue(tracks, point.index, undefined, point.positionMs);
+  }
+
+  async playAlbumFromBeginning(tracks: AudioTrack[]) {
+    if (tracks.length === 0) return;
+    await this.startQueue(tracks, 0, undefined, 0);
+  }
+
+  /** positionMs: where to start; by default where that track was left off. */
+  private async startQueue(tracks: AudioTrack[], index: number, shuffle?: boolean, positionMs?: number) {
     try {
       const resume = this.trackResumes[tracks[index].file_path];
-      const initialPos = resume && !resume.is_completed ? resume.position_ms : 0;
+      const initialPos = positionMs ?? (resume && !resume.is_completed ? resume.position_ms : 0);
       await api.playQueue(tracks, index, initialPos, shuffle);
       await this.refreshPlayback();
     } catch (e) {

@@ -30,12 +30,15 @@
 | D-21 | 途中まで聴いた曲はその位置から、聴き終えた曲は先頭から再生する | `a partly played track starts from its position`、`a completed track starts from the beginning` |
 | D-22 | 起動すると前回のフォルダーを開く | 手動 |
 | D-23 | 残り 3 秒以内まで聴いた曲を、聴き終えた曲とする | `a_track_is_completed_within_the_last_three_seconds` |
-| D-24 | アルバムの「続きから」は、最後に聴いていた曲の位置から再生する | 計画(段階 B) |
-| D-25 | 最後の曲を聴き終えていれば次の曲の先頭から、アルバムの最後なら 1 曲目から再生する | 計画(段階 B) |
+| D-24 | アルバムの「続きから」は、最後に聴いていた曲の位置から再生する | `album resumes at the position of an unfinished track`、`plays the folder from where it was left off` |
+| D-25 | 最後の曲を聴き終えていれば次の曲の先頭から、アルバムの最後なら 1 曲目から再生する | `album resumes at the next track after a completed track`、`album starts over after its last track is completed` |
 | D-26 | 曲が切り替わると、前の曲の最後の位置をその曲のアルバムに保存する | `leaving_a_track_records_its_position_under_its_own_album` |
 | D-27 | 再生を始めて 1 秒未満の位置は保存しない | `the_first_second_of_a_track_is_not_recorded` |
-| D-28 | 保存された曲がアルバムになければ 1 曲目から再生する | 計画(段階 B) |
+| D-28 | 保存された曲がアルバムになければ 1 曲目から再生する | `album starts over when the saved track is gone`、`offers nothing to resume in a folder never played or whose track is gone` |
+| S-12 | フォルダーの一覧に、続きから再生する曲を表示する。「最初から」でアルバムの 1 曲目の最初から再生できる | `folder shows the track its album resumes from`、`plays the folder from the first track at its start` |
 | D-29 | 一時停止したときも位置を保存する | `pausing_records_the_position` |
+
+S-12 は Android 版の storage.md の基準です。Windows 版はフォルダービューにだけ表示し、アルバムビューには表示しません(アルバムビューはフォルダーを移動する画面ではないため)。
 
 D-29 は Windows 版で番号を付けた基準です。Android 版も再生が止まると位置を記録しています。
 

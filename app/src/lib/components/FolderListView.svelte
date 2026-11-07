@@ -6,6 +6,7 @@
     nextListIndex,
     visibleItemCount,
   } from "../listNavigation";
+  import { folderResumePoint } from "../albumResume";
   import { formatTime, playerState } from "../playerState.svelte";
   import type { AudioTrack, FolderItem } from "../types";
 
@@ -14,6 +15,10 @@
     items
       .filter((i) => !i.is_directory && i.track !== null)
       .map((i) => i.track as AudioTrack)
+  );
+
+  let resumePoint = $derived(
+    folderResumePoint(audioTracks, playerState.albumResume, playerState.trackResumes)
   );
 
   let allSelected = $derived(
@@ -174,6 +179,35 @@
       {playerState.isLoadingFolder ? "読み込み中…" : "このフォルダにはアイテムがありません。"}
     </div>
   {:else}
+    {#if audioTracks.length > 0}
+      <div class="resume-banner">
+        {#if resumePoint}
+          <button
+            class="resume-btn"
+            title="このフォルダーを続きから再生"
+            onclick={() => playerState.playAlbumResume(audioTracks)}
+          >
+            ▷ 続きから: {audioTracks[resumePoint.index].title}
+            <span class="resume-at">{formatTime(resumePoint.positionMs)}</span>
+          </button>
+          <button
+            class="restart-btn"
+            title="このフォルダーを 1 曲目の最初から再生"
+            onclick={() => playerState.playAlbumFromBeginning(audioTracks)}
+          >
+            最初から
+          </button>
+        {:else}
+          <button
+            class="resume-btn"
+            title="このフォルダーを 1 曲目から再生"
+            onclick={() => playerState.playAlbumFromBeginning(audioTracks)}
+          >
+            ▷ 最初から再生: {audioTracks[0].title}
+          </button>
+        {/if}
+      </div>
+    {/if}
     <div class="list-table">
       <div class="table-header">
         <span class="col-check">
@@ -319,6 +353,43 @@
     flex: 1;
     overflow-y: auto;
     background: var(--nord0);
+  }
+
+  .resume-banner {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--nord1);
+    border-bottom: 1px solid var(--nord3);
+  }
+
+  .resume-btn,
+  .restart-btn {
+    padding: 4px 12px;
+    border: 1px solid var(--nord8);
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .resume-btn {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--nord0);
+    background: var(--nord8);
+    font-weight: bold;
+  }
+
+  .resume-at {
+    margin-left: 6px;
+    font-weight: normal;
+  }
+
+  .restart-btn {
+    flex-shrink: 0;
+    color: var(--nord8);
   }
 
   .empty-state {
