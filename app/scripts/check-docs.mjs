@@ -18,6 +18,7 @@ function walk(dir, matches, out = []) {
 }
 
 const problems = [];
+const planned = [];
 const documents = walk(ROOT, (name) => name.endsWith(".md") && name !== "THIRD_PARTY_NOTICES.md");
 const code = walk(join(ROOT, "app"), (name) => name.endsWith(".rs") || name.endsWith(".test.ts"))
   .map((path) => readFileSync(path, "utf-8"))
@@ -41,6 +42,10 @@ for (const document of documents) {
       if (cells.length < 5 || !/^[A-Z]-\d+$/.test(cells[1].trim())) continue;
       const verification = cells[3];
       const tests = [...verification.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+      if (verification.includes("計画")) {
+        planned.push(`${where}: ${cells[1].trim()} ${verification.trim()}`);
+        continue;
+      }
       if (tests.length === 0 && !verification.includes("手動")) {
         problems.push(`${where}: ${cells[1].trim()} says nothing about how it is checked`);
       }
@@ -56,5 +61,9 @@ for (const document of documents) {
 if (problems.length > 0) {
   console.error(problems.join("\n"));
   process.exit(1);
+}
+if (planned.length > 0) {
+  console.log(`${planned.length} acceptance criteria are planned but not built yet:`);
+  console.log(planned.map((line) => `  ${line}`).join("\n"));
 }
 console.log(`${documents.length} documents checked`);

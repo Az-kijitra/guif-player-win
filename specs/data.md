@@ -20,11 +20,43 @@
 | D-13 | 古いデータベースに新しい手順を適用できる | `a_later_migration_runs_on_an_older_database` |
 | D-14 | アプリより新しいデータベースは開かず、変更しない | `a_database_from_a_newer_version_is_refused_and_left_alone` |
 | D-15 | データベースを開けないときは理由を表示する | 手動 |
+| D-16 | 再生位置の保存の一部が失敗したら、すべて取り消す | `a_failed_track_resume_write_rolls_back_the_album_resume_write` |
 
 ## 再生位置
 
 | ID | 受入基準 | 確認 |
 |---|---|---|
 | D-20 | 再生中は 3 秒ごとに位置を保存する | 手動 |
-| D-21 | 途中まで聴いた曲はその位置から、聴き終えた曲は先頭から再生する | 手動 |
+| D-21 | 途中まで聴いた曲はその位置から、聴き終えた曲は先頭から再生する | `a partly played track starts from its position`、`a completed track starts from the beginning` |
 | D-22 | 起動すると前回のフォルダーを開く | 手動 |
+| D-23 | 残り 3 秒以内まで聴いた曲を、聴き終えた曲とする | `a_track_is_completed_within_the_last_three_seconds` |
+| D-24 | アルバムの「続きから」は、最後に聴いていた曲の位置から再生する | 計画(段階 B) |
+| D-25 | 最後の曲を聴き終えていれば次の曲の先頭から、アルバムの最後なら 1 曲目から再生する | 計画(段階 B) |
+| D-26 | 曲が切り替わると、前の曲の最後の位置をその曲のアルバムに保存する | `leaving_a_track_records_its_position_under_its_own_album` |
+| D-27 | 再生を始めて 1 秒未満の位置は保存しない | `the_first_second_of_a_track_is_not_recorded` |
+| D-28 | 保存された曲がアルバムになければ 1 曲目から再生する | 計画(段階 B) |
+| D-29 | 一時停止したときも位置を保存する | `pausing_records_the_position` |
+
+D-29 は Windows 版で番号を付けた基準です。Android 版も再生が止まると位置を記録しています。
+
+## プレイリスト
+
+| ID | 受入基準 | 確認 |
+|---|---|---|
+| D-30 | プレイリストを削除すると、その曲の登録だけが消え、音楽ファイルと他のプレイリストは残る | `deleting_a_playlist_removes_its_tracks_and_keeps_the_others` |
+| D-31 | 開いているプレイリストを削除すると一覧に戻る | `deleting the open playlist closes it` |
+| D-32 | 同じ名前のプレイリストは作らず、理由を表示する | `creating_a_playlist_with_an_existing_name_is_refused`、`a refused name adds nothing to another playlist` |
+| D-33 | 見つからない曲があれば、その数を表示する | `missing_files_are_reported`、`says how many tracks of a playlist are missing` |
+
+## しおり
+
+| ID | 受入基準 | 確認 |
+|---|---|---|
+| D-40 | しおりは 1 つの曲に 1 つ。同じ曲で挟み直すと位置を上書きする | 計画(段階 C) |
+| D-41 | 複数の曲にしおりを挟め、一覧は新しく挟んだ順に並ぶ | 計画(段階 C) |
+| D-42 | 再生画面で、今の位置にしおりを挟み、挟んだ位置を知らせる | 計画(段階 C) |
+| D-43 | しおりを削除でき、ほかのしおりは残る | 計画(段階 C) |
+| D-44 | 一覧のしおりを選ぶと、その位置から再生し、アルバムの残りの曲に続ける | 計画(段階 C) |
+| D-45 | 曲が見つからなければ理由を表示し、しおりは残す | 計画(段階 C) |
+| D-46 | 古いデータベースを更新しても、データが残り、しおりを使える | 計画(段階 C) |
+
