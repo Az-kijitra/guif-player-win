@@ -9,6 +9,7 @@
 - Windows 10 / 11(64 ビット版)
 - Rust 1.90 以上
 - Node.js 22.17 以上
+- CMake(Opus のデコーダー libopus のビルドに使います。`winget install Kitware.CMake`)
 - Microsoft Edge WebView2 ランタイム
 
 ```powershell
@@ -16,6 +17,8 @@ cd app
 npm install
 npm run tauri dev
 ```
+
+リポジトリのパスが 90 文字ほどを超える深いフォルダーに置くと、libopus のビルドが Windows のパスの長さの上限(260 文字)を超えて失敗します。浅いフォルダーに置いてください。
 
 ## 変更する前に確認すること
 

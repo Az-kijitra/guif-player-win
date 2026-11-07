@@ -19,22 +19,30 @@
 - **安全な保存**: 一時コピーへ書き込んで音声とタグを確認してから、元のファイルと置き換えます。失敗しても元のファイルは変わりません。
 - **アルバムビュー**: フォルダーごとのジャケットを一覧で表示します。
 - **プレイリスト**: 作成、追加、削除ができます。
+- **続きから聴く**: フォルダーを開くと、最後に聴いていた曲の続きから再生するボタンが出ます。曲ごとの再生位置も覚えます。
+- **しおり**: 曲の好きな位置にしおりを挟み、あとでその位置から再生できます。
+- **再生速度**: 0.8 倍から 2.0 倍まで、音の高さを変えずに速さを変えられます。
+- **Windows のメディア操作**: 曲名とジャケットを音量の表示やロック画面に出し、メディアキーやヘッドセットのボタンで操作できます。
 - **シャッフルとリピート**: 全曲を重複なく流すシャッフル、1 曲リピート、全曲リピートがあります。
 - **キーボード操作**: 一覧の移動、範囲選択、再生の操作、ビューの切り替えをキーボードだけで行えます。
-- **テーマ**: Nord、Default、Monokai、Catppuccin、Solarized、Light から選べます。guif の設定に合わせることもできます。
+- **テーマと文字の大きさ**: Nord、Default、Monokai、Catppuccin、Solarized、Light から選べます。guif の設定に合わせることもできます。文字の大きさは 4 段階です。
 
 <table>
   <tr>
     <td><img src="docs/images/artwork-view.png" alt="アルバムビュー"></td>
     <td><img src="docs/images/tag-editor.png" alt="タグの一括編集"></td>
   </tr>
+  <tr>
+    <td><img src="docs/images/player-detail.png" alt="詳細プレーヤー(再生速度としおり)"></td>
+    <td><img src="docs/images/bookmarks.png" alt="しおりの一覧"></td>
+  </tr>
 </table>
 
 ### 対応形式
 
-MP3 (`.mp3`)、FLAC (`.flac`)、AAC / ALAC (`.m4a`、`.aac`)、Ogg Vorbis (`.ogg`)、WAV (`.wav`)、AIFF (`.aif`、`.aiff`)
+MP3 (`.mp3`)、FLAC (`.flac`)、AAC / ALAC (`.m4a`、`.aac`)、Ogg Vorbis (`.ogg`)、Opus (`.opus`)、WAV (`.wav`)、AIFF (`.aif`、`.aiff`)
 
-Opus (`.opus`) には今後対応する予定です。WMA (`.wma`) と、DRM で保護された曲(iTunes Store の古い購入曲や Apple Music の曲など)は再生できません。
+WMA (`.wma`) と、DRM で保護された曲(iTunes Store の古い購入曲や Apple Music の曲など)は再生できません。
 
 ---
 
@@ -53,7 +61,9 @@ Opus (`.opus`) には今後対応する予定です。WMA (`.wma`) と、DRM で
 
 ### ソースからビルドする
 
-Rust 1.90 以上、Node.js 22.17 以上、Microsoft Edge WebView2 ランタイムが必要です。
+Rust 1.90 以上、Node.js 22.17 以上、CMake、Microsoft Edge WebView2 ランタイムが必要です。CMake は Opus のデコーダー(libopus)をビルドするために使います。
+
+> リポジトリのパスが 90 文字ほどを超える深いフォルダーに置くと、ビルドが失敗します。libopus のビルドが Windows のパスの長さの上限(260 文字)を超えるためです。`C:\src` のような浅いフォルダーに置いてください。
 
 ```powershell
 git clone https://github.com/Az-kijitra/guif-player-win.git
@@ -74,6 +84,8 @@ npm run tauri build
 | `Ctrl+→` / `Ctrl+←` | 次の曲 / 前の曲 |
 | `Alt+→` / `Alt+←` | 5 秒進む / 5 秒戻る |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | フォルダー / アルバム / プレイリストのビュー |
+| `[` / `]` | 再生速度を遅く / 速く |
+| `B` | 今の位置にしおりを挟む |
 | `Shift` + 移動キー | 範囲選択 |
 | `Ctrl+S` | タグの保存 |
 

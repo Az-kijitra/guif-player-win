@@ -64,6 +64,7 @@ guif-player 本体のライセンスは [MIT License](LICENSE) です。配布�
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 | https://github.com/rust-lang/cfg-if |
 | chrono | 0.4.45 | MIT OR Apache-2.0 | https://github.com/chronotope/chrono |
 | claxon | 0.4.3 | Apache-2.0 | https://github.com/ruuda/claxon |
+| cmake | 0.1.58 | MIT OR Apache-2.0 | https://github.com/rust-lang/cmake-rs |
 | cookie | 0.18.2 | MIT OR Apache-2.0 | https://github.com/SergioBenitez/cookie-rs |
 | core_detect | 1.0.0 | MIT/Apache-2.0 | https://github.com/thomcc/core_detect |
 | cpal | 0.15.3 | Apache-2.0 | https://github.com/rustaudio/cpal |
@@ -171,6 +172,7 @@ guif-player 本体のライセンスは [MIT License](LICENSE) です。配布�
 | ogg_pager | 0.8.0 | MIT OR Apache-2.0 | https://github.com/Serial-ATA/lofty-rs |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 | https://github.com/matklad/once_cell |
 | option-ext | 0.2.0 | MPL-2.0 | https://github.com/soc/option-ext.git |
+| opusic-sys | 0.7.7 | BSD-3-Clause | https://github.com/DoumanAsh/opusic-sys |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 | https://github.com/Amanieu/parking_lot |
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 | https://github.com/Amanieu/parking_lot |
 | paste | 1.0.15 | MIT OR Apache-2.0 | https://github.com/dtolnay/paste |
@@ -236,6 +238,7 @@ guif-player 本体のライセンスは [MIT License](LICENSE) です。配布�
 | string_cache_codegen | 0.6.1 | MIT OR Apache-2.0 | https://github.com/servo/string-cache |
 | strsim | 0.11.1 | MIT | https://github.com/rapidfuzz/strsim-rs |
 | symphonia | 0.5.5 | MPL-2.0 | https://github.com/pdeljanov/Symphonia |
+| symphonia-adapter-libopus | 0.2.9 | MIT OR Apache-2.0 | https://github.com/aschey/symphonia-adapters |
 | symphonia-bundle-flac | 0.5.5 | MPL-2.0 | https://github.com/pdeljanov/Symphonia |
 | symphonia-bundle-mp3 | 0.5.5 | MPL-2.0 | https://github.com/pdeljanov/Symphonia |
 | symphonia-codec-aac | 0.5.5 | MPL-2.0 | https://github.com/pdeljanov/Symphonia |
@@ -323,6 +326,7 @@ guif-player 本体のライセンスは [MIT License](LICENSE) です。配布�
 | winreg | 0.56.0 | MIT | https://github.com/gentoo90/winreg-rs |
 | writeable | 0.6.4 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | wry | 0.57.1 | Apache-2.0 OR MIT | https://github.com/tauri-apps/wry |
+| wsola | 0.3.0 | MIT | https://github.com/jhheider/pdcst |
 | yoke | 0.8.4 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | yoke-derive | 0.8.4 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | zerocopy | 0.8.63 | BSD-2-Clause OR Apache-2.0 OR MIT | https://github.com/google/zerocopy |

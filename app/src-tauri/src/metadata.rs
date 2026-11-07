@@ -42,7 +42,7 @@ pub fn is_supported_audio(path: &Path) -> bool {
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         matches!(
             ext.to_lowercase().as_str(),
-            "mp3" | "flac" | "m4a" | "aac" | "ogg" | "wav" | "aif" | "aiff"
+            "mp3" | "flac" | "m4a" | "aac" | "ogg" | "opus" | "wav" | "aif" | "aiff"
         )
     } else {
         false
@@ -111,6 +111,12 @@ pub fn parse_track(path: &Path) -> AudioTrack {
 }
 
 pub fn extract_artwork(path: &Path) -> Option<String> {
+    let (data, mime) = artwork_bytes(path)?;
+    Some(format!("data:{};base64,{}", mime, BASE64.encode(data)))
+}
+
+/// The artwork of a track and its MIME type: the embedded picture, or else the folder's cover.
+pub fn artwork_bytes(path: &Path) -> Option<(Vec<u8>, String)> {
     // 1. Try embedded tag
     if let Ok(tagged_file) = Probe::open(path).and_then(|p| p.read()) {
         if let Some(tag) = tagged_file
@@ -119,8 +125,7 @@ pub fn extract_artwork(path: &Path) -> Option<String> {
         {
             if let Some(pic) = tag.pictures().first() {
                 let mime = pic.mime_type().map(|m| m.as_str()).unwrap_or("image/jpeg");
-                let b64 = BASE64.encode(pic.data());
-                return Some(format!("data:{};base64,{}", mime, b64));
+                return Some((pic.data().to_vec(), mime.to_string()));
             }
         }
     }
@@ -139,8 +144,7 @@ pub fn extract_artwork(path: &Path) -> Option<String> {
                     "webp" => "image/webp",
                     _ => "image/jpeg",
                 };
-                let b64 = BASE64.encode(&data);
-                return Some(format!("data:{};base64,{}", mime, b64));
+                return Some((data, mime.to_string()));
             }
         }
     }
@@ -1039,10 +1043,44 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), wav_bytes());
     }
 
+    const OPUS_TONE: &[u8] = include_bytes!("../testdata/tone-440-660.opus");
+
+    #[test]
+    fn reads_the_tags_of_an_opus_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "tone.opus", OPUS_TONE);
+        let track = parse_track(&path);
+        assert_eq!(
+            (
+                track.title.as_str(),
+                track.artist.as_str(),
+                track.album.as_str()
+            ),
+            ("Opus Tone", "guif-player tests", "Fixtures")
+        );
+        assert!(
+            (1950..=2050).contains(&track.duration_ms),
+            "{}",
+            track.duration_ms
+        );
+    }
+
+    #[test]
+    fn writes_tags_in_opus() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_file(dir.path(), "tone.opus", OPUS_TONE);
+        let before = parse_track(&path).duration_ms;
+        saves_title(&path);
+        let after = parse_track(&path);
+        assert_eq!(after.artist, "guif-player tests", "other tags are kept");
+        assert_eq!(after.duration_ms, before);
+    }
+
     #[test]
     fn playable_formats_are_listed() {
         for name in [
-            "a.mp3", "a.flac", "a.m4a", "a.aac", "a.ogg", "a.wav", "a.aif", "a.aiff", "A.MP3",
+            "a.mp3", "a.flac", "a.m4a", "a.aac", "a.ogg", "a.opus", "a.wav", "a.aif", "a.aiff",
+            "A.MP3",
         ] {
             assert!(is_supported_audio(Path::new(name)), "{name}");
         }
@@ -1050,15 +1088,7 @@ mod tests {
 
     #[test]
     fn formats_without_a_decoder_are_not_listed() {
-        for name in [
-            "a.opus",
-            "a.wma",
-            "a.alac",
-            "a.txt",
-            "mp3",
-            "._a.mp3",
-            "dir/._a.m4a",
-        ] {
+        for name in ["a.wma", "a.alac", "a.txt", "mp3", "._a.mp3", "dir/._a.m4a"] {
             assert!(!is_supported_audio(Path::new(name)), "{name}");
         }
     }

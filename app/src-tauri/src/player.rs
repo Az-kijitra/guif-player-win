@@ -1,13 +1,16 @@
 use crate::models::{AudioTrack, PlaybackStateDto};
 use crate::queue::{PlayQueue, REPEAT_ONE};
-use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
+use crate::speed::{SharedSpeed, SpeedSource};
+use rodio::{OutputStreamHandle, Sink, Source};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use symphonia::core::audio::{SampleBuffer, SignalSpec};
-use symphonia::core::codecs::{Decoder as SymphDecoder, DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::codecs::{
+    CodecRegistry, Decoder as SymphDecoder, DecoderOptions, CODEC_TYPE_NULL,
+};
 use symphonia::core::errors::Error as SymphError;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo};
 use symphonia::core::io::{MediaSource, MediaSourceStream};
@@ -256,7 +259,7 @@ impl SymphoniaSource {
                     Duration::new(seconds, nanos)
                 });
 
-        let mut decoder = symphonia::default::get_codecs()
+        let mut decoder = codecs()
             .make(&codec_params, &DecoderOptions::default())
             .map_err(|_| "この音声形式には対応していません".to_string())?;
 
@@ -401,6 +404,17 @@ impl Source for SymphoniaSource {
     }
 }
 
+/// Symphonia's own decoders, and Opus through libopus
+fn codecs() -> &'static CodecRegistry {
+    static CODECS: OnceLock<CodecRegistry> = OnceLock::new();
+    CODECS.get_or_init(|| {
+        let mut registry = CodecRegistry::new();
+        symphonia::default::register_enabled_codecs(&mut registry);
+        registry.register_all::<symphonia_adapter_libopus::OpusDecoder>();
+        registry
+    })
+}
+
 pub struct AudioPlayer {
     stream_handle: Option<OutputStreamHandle>,
     sink: Option<Sink>,
@@ -412,25 +426,56 @@ pub struct AudioPlayer {
     elapsed_before_pause: Duration,
     volume: f32,
     failed_in_a_row: usize,
+    speed: SharedSpeed,
 }
 
 pub type SharedPlayer = Arc<Mutex<AudioPlayer>>;
 
 impl AudioPlayer {
-    pub fn new() -> SharedPlayer {
-        let stream_handle = match OutputStream::try_default() {
-            Ok((stream, handle)) => {
-                // Keep audio output stream alive for application lifetime
-                std::mem::forget(stream);
-                Some(handle)
-            }
-            Err(e) => {
-                eprintln!("Failed to initialize audio output stream: {}", e);
-                None
-            }
-        };
+    /// A player that has been playing `track` for `elapsed`, with no audio device behind it.
+    #[cfg(test)]
+    pub(crate) fn playing_for_tests(track: AudioTrack, elapsed: Duration) -> Self {
+        let mut player = Self::with_output(None);
+        player.current_track = Some(track.clone());
+        player.queue.set_tracks(vec![track], 0);
+        let (sink, _queue) = Sink::new_idle();
+        player.sink = Some(sink);
+        player.is_playing = true;
+        player.start_time = Instant::now().checked_sub(elapsed);
+        player
+    }
 
-        Arc::new(Mutex::new(Self::with_output(stream_handle)))
+    #[cfg(test)]
+    pub(crate) fn clear_current_track_for_tests(&mut self) {
+        self.current_track = None;
+    }
+
+    /// A player with no output yet: output::follow_default_output gives it one.
+    pub fn new() -> SharedPlayer {
+        Arc::new(Mutex::new(Self::with_output(None)))
+    }
+
+    /// Where to go on from on another output device: the track, the position, and whether it
+    /// was playing. None when nothing is loaded or the queue has finished.
+    fn output_resume_point(&self) -> Option<(AudioTrack, u64, bool)> {
+        self.sink.as_ref()?;
+        let track = self.current_track.clone()?;
+        Some((
+            track,
+            self.get_position_ms(),
+            self.is_playing && !self.is_paused,
+        ))
+    }
+
+    /// Moves playback to another output device, at the same place, paused if it was paused.
+    pub fn switch_output(&mut self, handle: OutputStreamHandle) {
+        let resume_point = self.output_resume_point();
+        self.stream_handle = Some(handle);
+        if let Some((track, position_ms, was_playing)) = resume_point {
+            if self.play_track(track, position_ms).is_ok() && !was_playing {
+                self.pause();
+            }
+        }
     }
 
     fn with_output(stream_handle: Option<OutputStreamHandle>) -> Self {
@@ -445,6 +490,7 @@ impl AudioPlayer {
             elapsed_before_pause: Duration::ZERO,
             volume: 1.0,
             failed_in_a_row: 0,
+            speed: SharedSpeed::new(1.0),
         }
     }
 
@@ -473,7 +519,7 @@ impl AudioPlayer {
         let sink =
             Sink::try_new(handle).map_err(|e| format!("音声の出力を開始できません: {}", e))?;
         sink.set_volume(self.volume);
-        sink.append(source);
+        sink.append(SpeedSource::new(source, self.speed.clone()));
 
         // Now safely stop the old sink
         if let Some(s) = self.sink.take() {
@@ -500,9 +546,13 @@ impl AudioPlayer {
         queue: Vec<AudioTrack>,
         start_index: usize,
         initial_pos_ms: u64,
+        shuffle: Option<bool>,
     ) -> Result<(), String> {
         if let Some(track) = queue.get(start_index).cloned() {
             self.play_track(track, initial_pos_ms)?;
+            if let Some(shuffle) = shuffle {
+                self.queue.set_shuffle(shuffle);
+            }
             self.queue.set_tracks(queue, start_index);
         }
         Ok(())
@@ -526,7 +576,7 @@ impl AudioPlayer {
             } else if self.is_playing {
                 sink.pause();
                 if let Some(st) = self.start_time {
-                    self.elapsed_before_pause += st.elapsed();
+                    self.elapsed_before_pause += self.media_time(st.elapsed());
                 }
                 self.start_time = None;
                 self.is_paused = true;
@@ -541,7 +591,7 @@ impl AudioPlayer {
             if self.is_playing && !self.is_paused {
                 sink.pause();
                 if let Some(st) = self.start_time {
-                    self.elapsed_before_pause += st.elapsed();
+                    self.elapsed_before_pause += self.media_time(st.elapsed());
                 }
                 self.start_time = None;
                 self.is_paused = true;
@@ -649,9 +699,27 @@ impl AudioPlayer {
         self.queue.toggle_repeat();
     }
 
+    /// Wall-clock time turned into time in the track
+    fn media_time(&self, wall: Duration) -> Duration {
+        wall.mul_f32(self.speed.get())
+    }
+
+    pub fn speed(&self) -> f32 {
+        self.speed.get()
+    }
+
+    /// Applies to the track playing at once. The position so far is kept at the old speed.
+    pub fn set_speed(&mut self, speed: f32) {
+        if let Some(st) = self.start_time {
+            self.elapsed_before_pause += self.media_time(st.elapsed());
+            self.start_time = Some(Instant::now());
+        }
+        self.speed.set(speed);
+    }
+
     pub fn get_position_ms(&self) -> u64 {
         if let Some(st) = self.start_time {
-            let running = st.elapsed();
+            let running = self.media_time(st.elapsed());
             (self.elapsed_before_pause + running).as_millis() as u64
         } else {
             self.elapsed_before_pause.as_millis() as u64
@@ -684,6 +752,7 @@ impl AudioPlayer {
             shuffle_mode: self.queue.shuffle(),
             repeat_mode: self.queue.repeat_mode(),
             queue_version: self.queue.version(),
+            speed: self.speed.get(),
         }
     }
 
@@ -743,6 +812,80 @@ impl AudioPlayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const OPUS_TONE: &[u8] = include_bytes!("../testdata/tone-440-660.opus");
+
+    fn crossings_per_second(samples: &[f32]) -> f32 {
+        let body = &samples[samples.len() / 10..samples.len() * 9 / 10];
+        let crossings = body
+            .windows(2)
+            .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+            .count();
+        crossings as f32 / (body.len() as f32 / 48_000.0)
+    }
+
+    #[test]
+    fn opus_files_play_with_both_channels_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tone.opus");
+        fs::write(&path, OPUS_TONE).unwrap();
+        let source = SymphoniaSource::from_path(&path).unwrap();
+        assert_eq!((source.channels(), source.sample_rate()), (2, 48_000));
+        let samples: Vec<f32> = source.collect();
+
+        let seconds = samples.len() as f32 / 2.0 / 48_000.0;
+        assert!(
+            (seconds - 2.0).abs() < 0.03,
+            "the encoder's padding is skipped: {seconds}"
+        );
+        let left: Vec<f32> = samples.iter().step_by(2).copied().collect();
+        let right: Vec<f32> = samples.iter().skip(1).step_by(2).copied().collect();
+        let (l, r) = (crossings_per_second(&left), crossings_per_second(&right));
+        assert!((l - 440.0).abs() < 3.0, "left {l}");
+        assert!((r - 660.0).abs() < 3.0, "right {r}");
+    }
+
+    #[test]
+    fn opus_files_can_be_seeked() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tone.opus");
+        fs::write(&path, OPUS_TONE).unwrap();
+        let mut source = SymphoniaSource::from_path(&path).unwrap();
+        source.try_seek(Duration::from_millis(1500)).unwrap();
+        let rest = source.count() as f32 / 2.0 / 48_000.0;
+        assert!((rest - 0.5).abs() < 0.05, "half a second left: {rest}");
+    }
+
+    #[test]
+    fn a_new_output_device_goes_on_from_the_same_place() {
+        let mut player = AudioPlayer::playing_for_tests(
+            AudioTrack {
+                file_path: "C:/Music/a.mp3".into(),
+                file_name: "a.mp3".into(),
+                title: "a".into(),
+                artist: String::new(),
+                album: String::new(),
+                duration_ms: 60_000,
+                track_number: None,
+                has_artwork: false,
+            },
+            Duration::from_secs(5),
+        );
+        let (track, position_ms, playing) = player.output_resume_point().unwrap();
+        assert_eq!(track.file_name, "a.mp3");
+        assert!((5_000..5_500).contains(&position_ms), "{position_ms}");
+        assert!(playing);
+
+        player.pause();
+        let (_, _, playing) = player.output_resume_point().unwrap();
+        assert!(!playing, "a paused track stays paused");
+
+        player.sink = None;
+        assert!(
+            player.output_resume_point().is_none(),
+            "a finished queue does not start again"
+        );
+    }
     use crate::test_audio::{aiff_bytes, pcm_samples, wav_bytes};
     use std::fs;
     use std::io::Cursor;
@@ -898,6 +1041,26 @@ mod tests {
     }
 
     #[test]
+    fn the_position_advances_at_the_chosen_speed() {
+        let mut player = AudioPlayer::playing_for_tests(track("a.mp3"), Duration::from_secs(10));
+        let at = |p: &AudioPlayer| p.get_position_ms() / 1000;
+        assert_eq!(at(&player), 10);
+
+        player.set_speed(2.0);
+        player.start_time = Instant::now().checked_sub(Duration::from_secs(4));
+        assert_eq!(at(&player), 18, "ten seconds, then four at double speed");
+
+        player.pause();
+        assert_eq!(at(&player), 18, "a pause keeps the position");
+        player.set_speed(1.0);
+        assert_eq!(
+            at(&player),
+            18,
+            "changing the speed while paused moves nothing"
+        );
+    }
+
+    #[test]
     fn last_track_ending_stops_playback_once() {
         let mut player = player_at_track_end(1);
         assert!(player.check_track_end());
@@ -914,6 +1077,7 @@ mod tests {
     #[test]
     fn repeat_one_stops_when_the_track_cannot_be_played_again() {
         let mut player = player_at_track_end(2);
+        player.toggle_repeat();
         player.toggle_repeat();
 
         assert!(player.handle_track_end().is_err());
@@ -937,7 +1101,6 @@ mod tests {
     #[test]
     fn repeat_all_stops_once_every_track_has_failed() {
         let mut player = player_at_track_end(3);
-        player.toggle_repeat();
         player.toggle_repeat();
 
         assert!(player.handle_track_end().is_err());

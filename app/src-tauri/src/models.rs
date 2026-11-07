@@ -49,6 +49,7 @@ pub struct PlaybackStateDto {
     pub repeat_mode: u8, // 0 = off, 1 = one, 2 = all
     // This goes out several times a second, so it carries a version instead of the queue itself
     pub queue_version: u64,
+    pub speed: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,4 +102,17 @@ pub struct TagUpdateFailure {
 pub struct TagUpdateResult {
     pub updated: Vec<AudioTrack>,
     pub failed: Vec<TagUpdateFailure>,
+}
+
+/// A place in a track to come back to. One per track: the path identifies it.
+/// The title and album are copied when it is made, so the list needs no file access.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Bookmark {
+    pub file_path: String,
+    pub album_path: String,
+    pub title: String,
+    pub album: String,
+    pub position_ms: u64,
+    pub duration_ms: u64,
+    pub created_at: u64,
 }

@@ -16,11 +16,7 @@
   async function createAndAdd(e: SubmitEvent) {
     e.preventDefault();
     if (!newName.trim() || !track) return;
-    await playerState.createPlaylist(newName.trim());
-    const latest = playerState.playlists.find((p) => p.name === newName.trim());
-    if (latest) {
-      await playerState.addTrackToPlaylist(latest.id, track);
-    }
+    await playerState.createPlaylistAndAdd(newName.trim(), track);
     newName = "";
   }
 </script>

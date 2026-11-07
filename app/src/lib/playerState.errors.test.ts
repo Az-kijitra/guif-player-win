@@ -11,6 +11,8 @@ vi.mock("./api", () => ({
     listAlbums: vi.fn(),
     getQueue: vi.fn(),
     getAllTrackResumes: vi.fn(async () => []),
+    getAlbumResume: vi.fn(async () => null),
+    getBookmarks: vi.fn(async () => []),
     createPlaylist: vi.fn(),
     getPlaylists: vi.fn(),
   },

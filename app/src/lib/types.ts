@@ -41,6 +41,7 @@ export interface PlaybackState {
   shuffle_mode: boolean;
   repeat_mode: number; // 0 = off, 1 = one, 2 = all
   queue_version: number;
+  speed: number;
 }
 
 export interface AlbumResume {
@@ -100,3 +101,13 @@ export type ThemePreset =
   | "light";
 
 export type ThemeSetting = ThemePreset | "guif";
+
+export interface Bookmark {
+  file_path: string;
+  album_path: string;
+  title: string;
+  album: string;
+  position_ms: number;
+  duration_ms: number;
+  created_at: number;
+}

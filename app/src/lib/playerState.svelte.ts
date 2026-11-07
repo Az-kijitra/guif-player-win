@@ -1,5 +1,10 @@
+import { folderResumePoint } from "./albumResume";
+import { stepSpeed } from "./speed";
+import { type FontScaleId, fontScaleFromId, stepFontScale, zoomOf } from "./fontScale";
 import { api } from "./api";
 import type {
+  AlbumResume,
+  Bookmark,
   AlbumSummary,
   AudioTrack,
   FolderContent,
@@ -14,9 +19,12 @@ import type {
 } from "./types";
 
 const THEME_STORAGE_KEY = "guif_player_theme_setting";
+const FONT_SCALE_STORAGE_KEY = "guif_player_font_scale";
 const RESOLVED_THEME_STORAGE_KEY = "guif_player_resolved_theme";
 
 const ERROR_DISPLAY_MS = 8000;
+// Folders opened lately show at once when opened again, and are then read again in the background
+const FOLDER_CACHE_SIZE = 20;
 
 const VALID_PRESETS: ThemePreset[] = [
   "nord",
@@ -64,6 +72,8 @@ class PlayerStore {
 
   // Theme state (guif aligned)
   themeSetting = $state<ThemeSetting>("nord");
+  fontScale = $state<FontScaleId>("normal");
+  showSettings = $state<boolean>(false);
   resolvedTheme = $state<ThemePreset>("nord");
 
   constructor() {
@@ -77,6 +87,11 @@ class PlayerStore {
         this.resolvedTheme = cachedResolved;
         applyThemeToDom(cachedResolved);
       }
+      // The last size, applied before the database answers, so the page does not jump
+      this.fontScale = fontScaleFromId(localStorage.getItem(FONT_SCALE_STORAGE_KEY));
+      if (this.fontScale !== "normal") {
+        void api.setZoom(zoomOf(this.fontScale)).catch(() => {});
+      }
     }
   }
 
@@ -89,6 +104,7 @@ class PlayerStore {
     shuffle_mode: false,
     repeat_mode: 0,
     queue_version: 0,
+    speed: 1,
   });
   queue = $state<AudioTrack[]>([]);
 
@@ -96,16 +112,34 @@ class PlayerStore {
   isLoadingAlbums = $state<boolean>(false);
   // Scans run in the background now, so an older answer can arrive after a newer request
   private latestFolderRequest = 0;
+  private folderCache = new Map<string, FolderContent>();
+  missingPlaylistPaths = $state<Set<string>>(new Set());
+  bookmarks = $state<Bookmark[]>([]);
+  showBookmarks = $state<boolean>(false);
+  // Where the open folder was left off, for its "resume" button
+  albumResume = $state<AlbumResume | null>(null);
   private latestAlbumRequest = 0;
 
   errorMessage = $state<string | null>(null);
+  // "error" for failures, "info" for confirmations such as a bookmark being made
+  noticeKind = $state<"error" | "info">("error");
   private errorTimer: ReturnType<typeof setTimeout> | null = null;
 
   private syncInterval: number | null = null;
   private lastArtworkTrackPath: string | null = null;
+  private wasPlaying = false;
 
   showError(message: string) {
+    this.showMessage(message, "error");
+  }
+
+  showNotice(message: string) {
+    this.showMessage(message, "info");
+  }
+
+  private showMessage(message: string, kind: "error" | "info") {
     if (this.errorTimer) clearTimeout(this.errorTimer);
+    this.noticeKind = kind;
     this.errorMessage = message;
     this.errorTimer = setTimeout(() => this.clearError(), ERROR_DISPLAY_MS);
   }
@@ -134,6 +168,7 @@ class PlayerStore {
     try {
       await api.onPlaybackError((message) => this.showError(message));
       await this.loadTheme();
+      await this.loadFontScale();
       this.drives = await api.listDrives();
       const latestResume = await api.getLatestAlbumResume();
       const defaultPath = await api.getDefaultPath();
@@ -150,6 +185,7 @@ class PlayerStore {
       }
 
       await this.loadPlaylists();
+      await this.loadBookmarks();
       await this.loadResumes();
 
       // Poll playback state every 250ms
@@ -168,8 +204,16 @@ class PlayerStore {
       try {
         const state = await this.refreshPlayback();
 
+        // Stopping saves the position: show it in the list and in the resume button
+        if (this.wasPlaying && !state.is_playing) {
+          void this.loadResumes();
+        }
+        this.wasPlaying = state.is_playing;
+
         if (state.current_track?.file_path !== this.lastArtworkTrackPath) {
           this.lastArtworkTrackPath = state.current_track?.file_path ?? null;
+          // A new track moves the resume point and the marks in the list
+          void this.loadResumes();
           if (state.current_track) {
             this.currentArtwork = await api.getArtwork(state.current_track.file_path);
           } else {
@@ -193,16 +237,24 @@ class PlayerStore {
     return state;
   }
 
-  async navigateTo(path: string) {
+  async navigateTo(path: string, { useCache = true } = {}) {
     const request = ++this.latestFolderRequest;
-    this.isLoadingFolder = true;
+    const cached = useCache ? this.folderCache.get(path) : undefined;
+    if (cached) {
+      this.currentPath = path;
+      this.folderContent = cached;
+    } else {
+      this.isLoadingFolder = true;
+    }
     try {
       const content = await api.listFolder(path);
+      this.rememberFolder(content);
       if (request !== this.latestFolderRequest) return;
       this.currentPath = path;
       this.folderContent = content;
       await this.loadResumes();
     } catch (e) {
+      this.folderCache.delete(path);
       if (request === this.latestFolderRequest) {
         this.reportError("フォルダーを開けません", e);
       }
@@ -210,6 +262,22 @@ class PlayerStore {
       if (request === this.latestFolderRequest) {
         this.isLoadingFolder = false;
       }
+    }
+  }
+
+  /** Reads the folder again, ignoring what was remembered. */
+  async refreshFolder() {
+    if (this.currentPath) {
+      await this.navigateTo(this.currentPath, { useCache: false });
+    }
+  }
+
+  private rememberFolder(content: FolderContent) {
+    this.folderCache.delete(content.current_path);
+    this.folderCache.set(content.current_path, content);
+    while (this.folderCache.size > FOLDER_CACHE_SIZE) {
+      const oldest = this.folderCache.keys().next().value as string;
+      this.folderCache.delete(oldest);
     }
   }
 
@@ -248,22 +316,41 @@ class PlayerStore {
   }
 
   async selectPlaylist(id: number) {
+    this.showBookmarks = false;
     this.activePlaylistId = id;
+    this.missingPlaylistPaths = new Set();
     try {
-      this.playlistTracks = await api.getPlaylistTracks(id);
+      const tracks = await api.getPlaylistTracks(id);
+      this.playlistTracks = tracks;
+      const missing = await api.findMissingFiles(tracks.map((t) => t.file_path));
+      if (this.activePlaylistId !== id) return;
+      this.missingPlaylistPaths = new Set(missing);
+      if (missing.length > 0) {
+        this.showError(`見つからない曲が ${missing.length} 曲あります。移動または削除された可能性があります`);
+      }
     } catch (e) {
       this.reportError("プレイリストの曲を読み込めません", e);
     }
   }
 
-  async createPlaylist(name: string) {
-    if (!name.trim()) return;
+  /** The new playlist, or null when it could not be made (the reason is shown). */
+  async createPlaylist(name: string): Promise<Playlist | null> {
+    if (!name.trim()) return null;
     try {
       const p = await api.createPlaylist(name.trim());
       await this.loadPlaylists();
       await this.selectPlaylist(p.id);
+      return p;
     } catch (e) {
       this.reportError("プレイリストを作成できません", e);
+      return null;
+    }
+  }
+
+  async createPlaylistAndAdd(name: string, track: AudioTrack) {
+    const created = await this.createPlaylist(name);
+    if (created) {
+      await this.addTrackToPlaylist(created.id, track);
     }
   }
 
@@ -311,22 +398,117 @@ class PlayerStore {
         map[item.file_path] = item;
       }
       this.trackResumes = map;
+      const folder = this.currentPath;
+      const albumResume = folder ? await api.getAlbumResume(folder) : null;
+      if (folder === this.currentPath) {
+        this.albumResume = albumResume;
+      }
     } catch (e) {
       this.reportError("再生位置を読み込めません", e);
     }
   }
 
   async playTrackInList(track: AudioTrack, trackList: AudioTrack[]) {
-    try {
-      const index = trackList.findIndex((t) => t.file_path === track.file_path);
-      const resume = this.trackResumes[track.file_path];
-      const initialPos = resume && !resume.is_completed ? resume.position_ms : 0;
+    const index = trackList.findIndex((t) => t.file_path === track.file_path);
+    await this.startQueue(trackList, Math.max(0, index));
+  }
 
-      await api.playQueue(trackList, Math.max(0, index), initialPos);
+  /** Plays a whole list: in order from the top, or shuffled from a random track. */
+  async playAll(tracks: AudioTrack[], shuffle: boolean) {
+    if (tracks.length === 0) return;
+    // Starting on a track known to be missing would only fail
+    const playable = tracks
+      .map((_, index) => index)
+      .filter((index) => !this.missingPlaylistPaths.has(tracks[index].file_path));
+    const candidates = playable.length > 0 ? playable : [0];
+    const start = shuffle ? candidates[Math.floor(Math.random() * candidates.length)] : candidates[0];
+    await this.startQueue(tracks, start, shuffle);
+  }
+
+  async openBookmarks() {
+    this.showBookmarks = true;
+    this.activePlaylistId = null;
+    await this.loadBookmarks();
+  }
+
+  async loadBookmarks() {
+    try {
+      this.bookmarks = await api.getBookmarks();
+    } catch (e) {
+      this.reportError("しおりを読み込めません", e);
+    }
+  }
+
+  /** Bookmarks the current position of the track playing (one per track: a new one replaces it). */
+  async addBookmark() {
+    try {
+      const made = await api.addBookmark();
+      this.showNotice(`しおりを挟みました: ${made.title} (${formatTime(made.position_ms)})`);
+      await this.loadBookmarks();
+    } catch (e) {
+      this.showError(String(e));
+    }
+  }
+
+  async deleteBookmark(filePath: string) {
+    try {
+      await api.deleteBookmark(filePath);
+      await this.loadBookmarks();
+    } catch (e) {
+      this.reportError("しおりを削除できません", e);
+    }
+  }
+
+  /** Plays from the bookmark, and then the rest of its album, as clicking the track would. */
+  async playBookmark(bookmark: Bookmark) {
+    let tracks: AudioTrack[] = [];
+    try {
+      const folder = await api.listFolder(bookmark.album_path);
+      tracks = folder.items.filter((i) => i.track !== null).map((i) => i.track as AudioTrack);
+    } catch {
+      // The folder is gone: reported below like a missing track
+    }
+    const index = tracks.findIndex((t) => t.file_path === bookmark.file_path);
+    if (index < 0) {
+      this.showError(`しおりの曲が見つかりません: ${bookmark.title}。ファイルの移動や削除を確認してください`);
+      return;
+    }
+    await this.startQueue(tracks, index, undefined, bookmark.position_ms);
+  }
+
+  /** The folder's tracks from where the album was left off (see albumResume.ts). */
+  async playAlbumResume(tracks: AudioTrack[]) {
+    if (tracks.length === 0) return;
+    const point = folderResumePoint(tracks, this.albumResume, this.trackResumes) ?? { index: 0, positionMs: 0 };
+    await this.startQueue(tracks, point.index, undefined, point.positionMs);
+  }
+
+  async playAlbumFromBeginning(tracks: AudioTrack[]) {
+    if (tracks.length === 0) return;
+    await this.startQueue(tracks, 0, undefined, 0);
+  }
+
+  /** positionMs: where to start; by default where that track was left off. */
+  private async startQueue(tracks: AudioTrack[], index: number, shuffle?: boolean, positionMs?: number) {
+    try {
+      const resume = this.trackResumes[tracks[index].file_path];
+      const initialPos = positionMs ?? (resume && !resume.is_completed ? resume.position_ms : 0);
+      await api.playQueue(tracks, index, initialPos, shuffle);
       await this.refreshPlayback();
     } catch (e) {
       this.showError(String(e));
     }
+  }
+
+  async setPlaybackSpeed(speed: number) {
+    await this.attempt(async () => {
+      const applied = await api.setPlaybackSpeed(speed);
+      this.playback = { ...this.playback, speed: applied };
+    });
+  }
+
+  async stepPlaybackSpeed(step: 1 | -1) {
+    await this.setPlaybackSpeed(stepSpeed(this.playback.speed, step));
   }
 
   async togglePlayPause() {
@@ -460,6 +642,7 @@ class PlayerStore {
     // Refresh current folder & playlist
     if (this.currentPath) {
       this.folderContent = await api.listFolder(this.currentPath);
+      this.rememberFolder(this.folderContent);
     }
     if (this.viewMode === "ARTWORK" && this.currentPath) {
       this.albums = await api.listAlbums(this.currentPath);
@@ -480,6 +663,35 @@ class PlayerStore {
     this.artworkVersion += 1;
 
     return result;
+  }
+
+  async loadFontScale() {
+    try {
+      this.applyFontScale(fontScaleFromId(await api.getFontScale()));
+    } catch (e) {
+      this.reportError("文字の大きさを読み込めません", e);
+    }
+  }
+
+  async setFontScale(id: FontScaleId) {
+    this.applyFontScale(id);
+    try {
+      await api.saveFontScale(id);
+    } catch (e) {
+      this.reportError("文字の大きさを保存できません", e);
+    }
+  }
+
+  async stepFontScale(step: 1 | -1) {
+    await this.setFontScale(stepFontScale(this.fontScale, step));
+  }
+
+  private applyFontScale(id: FontScaleId) {
+    this.fontScale = id;
+    void api.setZoom(zoomOf(id)).catch((e) => console.error("Failed to zoom:", e));
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(FONT_SCALE_STORAGE_KEY, id);
+    }
   }
 
   async loadTheme() {

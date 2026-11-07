@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { speedLabel } from "../speed";
   import { formatTime, playerState } from "../playerState.svelte";
 
   let isSeeking = $state(false);
@@ -48,7 +49,12 @@
       {/if}
     </div>
     <div class="meta">
-      <span class="title">{track?.title ?? "再生していません"}</span>
+      <span class="title">
+        {track?.title ?? "再生していません"}
+        {#if speedLabel(playerState.playback.speed)}
+          <span class="speed-badge" title="再生速度">{speedLabel(playerState.playback.speed)}</span>
+        {/if}
+      </span>
       <span class="artist">{track?.artist ?? "guif-player"}</span>
     </div>
   </div>
@@ -167,6 +173,16 @@
     gap: 12px;
     cursor: pointer;
     overflow: hidden;
+  }
+
+  .speed-badge {
+    margin-left: 6px;
+    padding: 0 4px;
+    font-size: 10px;
+    font-weight: normal;
+    color: var(--nord0);
+    background: var(--nord8);
+    border-radius: 2px;
   }
 
   .track-info:hover .title {
