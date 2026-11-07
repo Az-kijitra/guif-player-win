@@ -111,6 +111,12 @@ pub fn parse_track(path: &Path) -> AudioTrack {
 }
 
 pub fn extract_artwork(path: &Path) -> Option<String> {
+    let (data, mime) = artwork_bytes(path)?;
+    Some(format!("data:{};base64,{}", mime, BASE64.encode(data)))
+}
+
+/// The artwork of a track and its MIME type: the embedded picture, or else the folder's cover.
+pub fn artwork_bytes(path: &Path) -> Option<(Vec<u8>, String)> {
     // 1. Try embedded tag
     if let Ok(tagged_file) = Probe::open(path).and_then(|p| p.read()) {
         if let Some(tag) = tagged_file
@@ -119,8 +125,7 @@ pub fn extract_artwork(path: &Path) -> Option<String> {
         {
             if let Some(pic) = tag.pictures().first() {
                 let mime = pic.mime_type().map(|m| m.as_str()).unwrap_or("image/jpeg");
-                let b64 = BASE64.encode(pic.data());
-                return Some(format!("data:{};base64,{}", mime, b64));
+                return Some((pic.data().to_vec(), mime.to_string()));
             }
         }
     }
@@ -139,8 +144,7 @@ pub fn extract_artwork(path: &Path) -> Option<String> {
                     "webp" => "image/webp",
                     _ => "image/jpeg",
                 };
-                let b64 = BASE64.encode(&data);
-                return Some(format!("data:{};base64,{}", mime, b64));
+                return Some((data, mime.to_string()));
             }
         }
     }

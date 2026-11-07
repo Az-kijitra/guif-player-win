@@ -1,6 +1,8 @@
 pub mod db;
+pub mod media_controls;
 pub mod metadata;
 pub mod models;
+pub mod output;
 pub mod player;
 pub mod queue;
 pub mod resume;
@@ -15,6 +17,7 @@ use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager, State};
 
 use crate::db::Database;
+use crate::media_controls::{MediaButton, NowPlaying};
 use crate::models::{
     AlbumResume, AlbumSummary, AudioTrack, Bookmark, FolderContent, PlaybackStateDto, Playlist,
     TagUpdateRequest, TagUpdateResult, TrackResume,
@@ -200,6 +203,32 @@ async fn toggle_play_pause(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 async fn pause(state: State<'_, AppState>) -> Result<(), String> {
     with_player(state, pause_and_record).await
+}
+
+/// A button of the Windows media controls, a media key or a headset button
+fn press_media_button(button: MediaButton, player: &mut AudioPlayer, db: &Database) {
+    let result = match button {
+        MediaButton::Play if !player.get_state_dto().is_playing => player
+            .toggle_play_pause()
+            .map(|_| record_current_track_resume(player, db)),
+        MediaButton::Play => Ok(()),
+        MediaButton::Pause => {
+            pause_and_record(player, db);
+            Ok(())
+        }
+        MediaButton::Next | MediaButton::Previous => {
+            resume::record_position(&player.get_state_dto(), db);
+            let moved = if button == MediaButton::Next {
+                player.play_next()
+            } else {
+                player.play_previous()
+            };
+            moved.map(|_| record_current_track_resume(player, db))
+        }
+    };
+    if let Err(e) = result {
+        eprintln!("Media button {:?} failed: {}", button, e);
+    }
 }
 
 fn pause_and_record(player: &mut AudioPlayer, db: &Database) {
@@ -643,6 +672,28 @@ fn show_startup_error(message: &str) {
     eprintln!("{}", message);
 }
 
+#[cfg(windows)]
+fn start_media_controls(
+    app: &tauri::App,
+    player: &SharedPlayer,
+    db: &Arc<Database>,
+) -> Option<std::sync::mpsc::Sender<Option<NowPlaying>>> {
+    let hwnd = app.get_webview_window("main")?.hwnd().ok()?;
+    let (player, db) = (Arc::clone(player), Arc::clone(db));
+    media_controls::start(hwnd.0 as isize, move |button| {
+        press_media_button(button, &mut player.lock().unwrap(), &db);
+    })
+}
+
+#[cfg(not(windows))]
+fn start_media_controls(
+    _app: &tauri::App,
+    _player: &SharedPlayer,
+    _db: &Arc<Database>,
+) -> Option<std::sync::mpsc::Sender<Option<NowPlaying>>> {
+    None
+}
+
 pub fn run() {
     let player = AudioPlayer::new();
     let db = match Database::new() {
@@ -654,6 +705,7 @@ pub fn run() {
     };
 
     player.lock().unwrap().set_speed(saved_playback_speed(&db));
+    output::follow_default_output(Arc::clone(&player));
 
     let player_clone = Arc::clone(&player);
     let db_clone = Arc::clone(&db);
@@ -685,10 +737,12 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let thread_player = Arc::clone(&player_clone);
             let thread_db = Arc::clone(&db_clone);
+            let media_controls = start_media_controls(app, &player_clone, &db_clone);
 
             // Auto-advance & Periodic Save Background Loop
             std::thread::spawn(move || {
                 let mut last_resume_save = Instant::now();
+                let mut told_windows: Option<NowPlaying> = None;
                 loop {
                     std::thread::sleep(Duration::from_millis(400));
 
@@ -718,6 +772,14 @@ pub fn run() {
                     {
                         last_resume_save = Instant::now();
                         resume::record_position(&state_dto, &thread_db);
+                    }
+
+                    if let Some(media_controls) = &media_controls {
+                        let now = media_controls::now_playing(&p.get_state_dto());
+                        if now != told_windows {
+                            let _ = media_controls.send(now.clone());
+                            told_windows = now;
+                        }
                     }
                 }
             });

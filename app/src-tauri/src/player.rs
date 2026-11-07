@@ -1,7 +1,7 @@
 use crate::models::{AudioTrack, PlaybackStateDto};
 use crate::queue::{PlayQueue, REPEAT_ONE};
 use crate::speed::{SharedSpeed, SpeedSource};
-use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
+use rodio::{OutputStreamHandle, Sink, Source};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -437,20 +437,32 @@ impl AudioPlayer {
         self.current_track = None;
     }
 
+    /// A player with no output yet: output::follow_default_output gives it one.
     pub fn new() -> SharedPlayer {
-        let stream_handle = match OutputStream::try_default() {
-            Ok((stream, handle)) => {
-                // Keep audio output stream alive for application lifetime
-                std::mem::forget(stream);
-                Some(handle)
-            }
-            Err(e) => {
-                eprintln!("Failed to initialize audio output stream: {}", e);
-                None
-            }
-        };
+        Arc::new(Mutex::new(Self::with_output(None)))
+    }
 
-        Arc::new(Mutex::new(Self::with_output(stream_handle)))
+    /// Where to go on from on another output device: the track, the position, and whether it
+    /// was playing. None when nothing is loaded or the queue has finished.
+    fn output_resume_point(&self) -> Option<(AudioTrack, u64, bool)> {
+        self.sink.as_ref()?;
+        let track = self.current_track.clone()?;
+        Some((
+            track,
+            self.get_position_ms(),
+            self.is_playing && !self.is_paused,
+        ))
+    }
+
+    /// Moves playback to another output device, at the same place, paused if it was paused.
+    pub fn switch_output(&mut self, handle: OutputStreamHandle) {
+        let resume_point = self.output_resume_point();
+        self.stream_handle = Some(handle);
+        if let Some((track, position_ms, was_playing)) = resume_point {
+            if self.play_track(track, position_ms).is_ok() && !was_playing {
+                self.pause();
+            }
+        }
     }
 
     fn with_output(stream_handle: Option<OutputStreamHandle>) -> Self {
@@ -787,6 +799,37 @@ impl AudioPlayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_output_device_goes_on_from_the_same_place() {
+        let mut player = AudioPlayer::playing_for_tests(
+            AudioTrack {
+                file_path: "C:/Music/a.mp3".into(),
+                file_name: "a.mp3".into(),
+                title: "a".into(),
+                artist: String::new(),
+                album: String::new(),
+                duration_ms: 60_000,
+                track_number: None,
+                has_artwork: false,
+            },
+            Duration::from_secs(5),
+        );
+        let (track, position_ms, playing) = player.output_resume_point().unwrap();
+        assert_eq!(track.file_name, "a.mp3");
+        assert!((5_000..5_500).contains(&position_ms), "{position_ms}");
+        assert!(playing);
+
+        player.pause();
+        let (_, _, playing) = player.output_resume_point().unwrap();
+        assert!(!playing, "a paused track stays paused");
+
+        player.sink = None;
+        assert!(
+            player.output_resume_point().is_none(),
+            "a finished queue does not start again"
+        );
+    }
     use crate::test_audio::{aiff_bytes, pcm_samples, wav_bytes};
     use std::fs;
     use std::io::Cursor;

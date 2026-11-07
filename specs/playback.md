@@ -76,7 +76,11 @@ Android 版の「バックグラウンド」(P-50〜P-52)にあたる、Windows 
 
 | ID | 受入基準 | 確認 |
 |---|---|---|
-| P-50 | Windows のメディア操作(音量の表示、ロック画面)に曲名とジャケットを出し、そこから再生、一時停止、前後の曲を操作できる | 計画(段階 F) |
-| P-51 | キーボードのメディアキーと、ヘッドセットのボタンに応答する | 計画(段階 F) |
-| P-53 | 既定の出力先が変わったとき(ヘッドホンの抜き差しなど)、新しい出力先で再生を続ける | 計画(段階 F) |
+| P-50 | Windows のメディア操作(音量の表示、ロック画面)に曲名とジャケットを出し、そこから再生、一時停止、前後の曲を操作できる | `windows_is_told_the_title_artist_album_and_play_state`、`a_pause_does_not_send_the_track_again_but_a_tag_edit_does`、手動 |
+| P-51 | キーボードのメディアキーと、ヘッドセットのボタンに応答する | 手動 |
+| P-53 | 既定の出力先が変わったとき(ヘッドホンの抜き差しなど)、新しい出力先で再生を続ける | `the_default_device_is_followed_only_when_it_changes`、`a_device_that_failed_to_open_is_tried_again`、`a_new_output_device_goes_on_from_the_same_place`、手動 |
+
+Windows の SMTC(System Media Transport Controls)を使います。メディアキーとヘッドセットのボタンは、Windows が SMTC へ届けるので、P-50 の操作と同じ経路になります。曲を読み込んでいないときは、Windows のメディア操作に何も出しません。
+
+出力先は 1 秒ごとに既定の出力先を確かめ、変わったら新しい出力先で同じ位置から再生を続けます。一時停止中なら一時停止のままにします。出力先がなくなっただけのときは、次の出力先が現れるまで待ちます。
 
