@@ -36,6 +36,8 @@ pub struct AlbumSummary {
     pub track_count: usize,
     pub first_track_path: String,
     pub has_artwork: bool,
+    /// A folder with no tracks of its own: the album view opens it instead of playing it
+    pub is_folder: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

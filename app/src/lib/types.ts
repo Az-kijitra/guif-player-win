@@ -30,6 +30,8 @@ export interface AlbumSummary {
   track_count: number;
   first_track_path: string;
   has_artwork: boolean;
+  /** A folder with no tracks of its own: opening it stays in the album view */
+  is_folder: boolean;
 }
 
 export interface PlaybackState {

@@ -252,6 +252,10 @@ class PlayerStore {
       if (request !== this.latestFolderRequest) return;
       this.currentPath = path;
       this.folderContent = content;
+      if (this.viewMode === "ARTWORK") {
+        // The album view lists the albums under the folder it is in
+        void this.loadAlbums();
+      }
       await this.loadResumes();
     } catch (e) {
       this.folderCache.delete(path);
@@ -537,6 +541,15 @@ class PlayerStore {
 
   async toggleRepeat() {
     await api.toggleRepeat();
+  }
+
+  /** A card of the album view: a folder opens in the album view, an album in the folder view. */
+  async openAlbumViewItem(item: AlbumSummary) {
+    if (!item.is_folder) {
+      // Switching first, so the album's folder is not scanned for albums
+      this.setViewMode("FOLDER");
+    }
+    await this.navigateTo(item.folder_path);
   }
 
   setViewMode(mode: ViewMode) {

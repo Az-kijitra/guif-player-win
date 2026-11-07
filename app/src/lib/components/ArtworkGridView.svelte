@@ -63,10 +63,8 @@
     }
   });
 
-  async function onAlbumClick(album: AlbumSummary) {
-    // Navigate into the album's folder
-    await playerState.navigateTo(album.folder_path);
-    playerState.setViewMode("FOLDER");
+  function onAlbumClick(album: AlbumSummary) {
+    playerState.openAlbumViewItem(album);
   }
 </script>
 
@@ -75,8 +73,8 @@
     <div class="empty-state">読み込み中…</div>
   {:else if albums.length === 0}
     <div class="empty-state">
-      このディレクトリ配下にはアルバムが見つかりませんでした。<br />
-      上の [📁 フォルダ] から音楽フォルダを選択してください。
+      このフォルダーには、フォルダーも曲もありません。<br />
+      上のパスや [↑ 上へ] で、ほかのフォルダーへ移動してください。
     </div>
   {:else}
     <div class="grid" bind:this={gridEl}>
@@ -84,6 +82,8 @@
         {@const art = artworkCache[album.first_track_path]}
         <div
           class="album-card"
+          class:folder={album.is_folder}
+          title={album.is_folder ? `${album.album_name} を開く` : undefined}
           role="button"
           data-nav-item
           tabindex={index === activeCard ? 0 : -1}
@@ -92,14 +92,20 @@
           onkeydown={(e) => onCardKeydown(e, album, index)}
         >
           <div class="art-container">
-            {#if art}
+            {#if album.is_folder}
+              <div class="art-placeholder">
+                <span class="disc-icon">📁</span>
+              </div>
+            {:else if art}
               <img src={art} alt={album.album_name} class="art-img" />
             {:else}
               <div class="art-placeholder">
                 <span class="disc-icon">💿</span>
               </div>
             {/if}
-            <span class="track-count">{album.track_count}曲</span>
+            {#if !album.is_folder}
+              <span class="track-count">{album.track_count}曲</span>
+            {/if}
           </div>
 
           <div class="album-info">
@@ -107,7 +113,7 @@
               {album.album_name}
             </div>
             <div class="album-artist" title={album.artist_name}>
-              {album.artist_name}
+              {album.is_folder ? "フォルダー" : album.artist_name}
             </div>
           </div>
         </div>

@@ -87,7 +87,7 @@ async fn list_folder(path: String) -> Result<FolderContent, String> {
 
 #[tauri::command]
 async fn list_albums(root_path: String) -> Result<Vec<AlbumSummary>, String> {
-    run_blocking(move || scanner::list_albums(&root_path)).await
+    run_blocking(move || scanner::list_albums(&root_path)).await?
 }
 
 // ----------------------------------------------------

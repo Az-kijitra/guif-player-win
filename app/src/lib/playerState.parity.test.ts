@@ -15,12 +15,13 @@ vi.mock("./api", () => ({
     findMissingFiles: vi.fn(async () => []),
     setPlaybackSpeed: vi.fn(async (speed: number) => speed),
     getAlbumResume: vi.fn(async () => null),
+    listAlbums: vi.fn(async () => []),
   },
 }));
 
 import { api } from "./api";
 import { playerState } from "./playerState.svelte";
-import type { AudioTrack, FolderContent, TrackResume } from "./types";
+import type { AlbumSummary, AudioTrack, FolderContent, TrackResume } from "./types";
 
 const mocked = vi.mocked(api);
 const track = (n: number) => ({ file_path: `C:\\Music\\${n}.mp3` }) as AudioTrack;
@@ -67,6 +68,53 @@ describe("playing a whole list", () => {
     };
     await playerState.playTrackInList(tracks[2], tracks);
     expect(mocked.playQueue).toHaveBeenCalledWith(tracks, 2, 0, undefined);
+  });
+});
+
+describe("moving to another folder", () => {
+  it("the album view lists the albums of the folder it moves to", async () => {
+    mocked.listFolder.mockImplementation(async (path: string) => folder(path));
+    mocked.listAlbums.mockImplementation(
+      async (path: string) => [{ folder_path: `${path}\\A` }] as never,
+    );
+    playerState.setViewMode("ARTWORK");
+    await playerState.navigateTo("D:\\Music\\Jazz");
+    await vi.waitFor(() =>
+      expect(playerState.albums[0]?.folder_path).toBe("D:\\Music\\Jazz\\A"),
+    );
+    expect(mocked.listAlbums).toHaveBeenLastCalledWith("D:\\Music\\Jazz");
+  });
+
+  it("opening a folder in the album view stays in the album view", async () => {
+    mocked.listFolder.mockImplementation(async (path: string) => folder(path));
+    playerState.setViewMode("ARTWORK");
+    await playerState.openAlbumViewItem({
+      folder_path: "D:\\Music\\Rock",
+      is_folder: true,
+    } as AlbumSummary);
+    expect(playerState.viewMode).toBe("ARTWORK");
+    expect(playerState.currentPath).toBe("D:\\Music\\Rock");
+    await vi.waitFor(() => expect(mocked.listAlbums).toHaveBeenLastCalledWith("D:\\Music\\Rock"));
+  });
+
+  it("opening an album shows its folder in the folder view", async () => {
+    mocked.listFolder.mockImplementation(async (path: string) => folder(path));
+    playerState.setViewMode("ARTWORK");
+    mocked.listAlbums.mockClear();
+    await playerState.openAlbumViewItem({
+      folder_path: "D:\\Music\\Rock\\Loud",
+      is_folder: false,
+    } as AlbumSummary);
+    expect(playerState.viewMode).toBe("FOLDER");
+    expect(playerState.currentPath).toBe("D:\\Music\\Rock\\Loud");
+    expect(mocked.listAlbums).not.toHaveBeenCalled();
+  });
+
+  it("the folder view does not look for albums", async () => {
+    mocked.listFolder.mockImplementation(async (path: string) => folder(path));
+    playerState.setViewMode("FOLDER");
+    await playerState.navigateTo("D:\\Music\\Rock");
+    expect(mocked.listAlbums).not.toHaveBeenCalled();
   });
 });
 

@@ -52,8 +52,11 @@ P-8 は Windows 版だけの基準です。Android 版のシャッフル再生�
 | P-42 | 状態の取得で再生キュー全体を送らない | `fetches the queue only when its version changes`、`the_version_follows_the_tracks_and_nothing_else` |
 | P-44 | 一度開いたフォルダーは、もう一度開くとすぐに表示し、裏で読み直す | `shows a folder seen before at once and then reads it again`、`remembers only the most recent folders` |
 | P-45 | 再読込は覚えていた結果を使わずに読み直す | `a refresh reads the folder again without the remembered result` |
+| P-46 | アルバムビューでフォルダーを移動すると(パスのボタン、ドライブ、上へ)、移動先のアルバムを表示する | `the album view lists the albums of the folder it moves to`、`the folder view does not look for albums` |
+| P-47 | アルバムビューは今のフォルダーの直下を名前順に並べる。曲のあるフォルダーはアルバム、曲のないフォルダーはフォルダーとして表示する。今のフォルダーに曲があれば、先頭にアルバムとして表示する | `the_album_view_lists_what_is_directly_inside`、`a_folder_with_tracks_shows_itself_first` |
+| P-48 | アルバムビューでフォルダーを開くとアルバムビューのまま中へ移動し、アルバムを開くとフォルダービューでそのフォルダーを表示する | `opening a folder in the album view stays in the album view`、`opening an album shows its folder in the folder view` |
 
-P-43 は Android 版の文書プロバイダーに関する基準なので、Windows 版にはありません。
+P-43 は Android 版の文書プロバイダーに関する基準なので、Windows 版にはありません。P-46〜P-48 は Windows 版だけの基準です(Android 版にアルバムビューはありません)。
 
 ## 再生速度
 

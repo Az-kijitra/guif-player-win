@@ -1,9 +1,7 @@
 use crate::metadata::{is_supported_audio, parse_track};
 use crate::models::{AlbumSummary, FolderContent, FolderItem};
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 pub fn get_default_music_dir() -> String {
     dirs::audio_dir()
@@ -100,60 +98,73 @@ pub fn list_folder(folder_path: &str) -> Result<FolderContent, String> {
     })
 }
 
-pub fn list_albums(root_dir: &str) -> Vec<AlbumSummary> {
-    let mut album_map: HashMap<PathBuf, (String, String, usize, String, bool)> = HashMap::new();
-
-    // Scan max 3 levels deep from root_dir for fast response
-    for entry in WalkDir::new(root_dir)
-        .max_depth(3)
-        .sort_by_file_name()
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let p = entry.path();
-        if is_supported_audio(p) {
-            if let Some(parent) = p.parent() {
-                // The card shows the first track of the folder, so only that one's tags are read
-                let album = album_map.entry(parent.to_path_buf()).or_insert_with(|| {
-                    let track = parse_track(p);
-                    (
-                        if track.album != "Unknown Album" {
-                            track.album.clone()
-                        } else {
-                            parent
-                                .file_name()
-                                .map(|f| f.to_string_lossy().to_string())
-                                .unwrap_or_else(|| "Unknown".to_string())
-                        },
-                        track.artist.clone(),
-                        0,
-                        p.to_string_lossy().to_string(),
-                        track.has_artwork,
-                    )
-                });
-                album.2 += 1; // Increment track count
-            }
+/// What the album view shows for `root_dir`: what is directly inside it, in name order.
+/// A folder with tracks is an album, one without is a folder to open. The folder itself comes
+/// first as an album when it holds tracks, so an album's own folder is not shown empty.
+pub fn list_albums(root_dir: &str) -> Result<Vec<AlbumSummary>, String> {
+    let root = Path::new(root_dir);
+    let mut folders = Vec::new();
+    let mut has_tracks = false;
+    for entry in fs::read_dir(root).map_err(|e| e.to_string())?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            folders.push(path);
+        } else if is_supported_audio(&path) {
+            has_tracks = true;
         }
     }
+    folders.sort_by_key(|p| name_of(p).to_lowercase());
 
-    let mut result: Vec<AlbumSummary> = album_map
-        .into_iter()
-        .map(
-            |(path, (album_name, artist_name, track_count, first_track_path, has_artwork))| {
-                AlbumSummary {
-                    album_name,
-                    artist_name,
-                    folder_path: path.to_string_lossy().to_string(),
-                    track_count,
-                    first_track_path,
-                    has_artwork,
-                }
-            },
-        )
+    let mut result = Vec::new();
+    if has_tracks {
+        result.extend(album_of(root));
+    }
+    for folder in folders {
+        let entry = album_of(&folder).unwrap_or_else(|| AlbumSummary {
+            album_name: name_of(&folder),
+            artist_name: String::new(),
+            folder_path: folder.to_string_lossy().to_string(),
+            track_count: 0,
+            first_track_path: String::new(),
+            has_artwork: false,
+            is_folder: true,
+        });
+        result.push(entry);
+    }
+    Ok(result)
+}
+
+fn name_of(path: &Path) -> String {
+    path.file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
+}
+
+/// The folder as an album, if it holds tracks. The card shows the first track in name order,
+/// so only that one's tags are read.
+fn album_of(dir: &Path) -> Option<AlbumSummary> {
+    let mut tracks: Vec<PathBuf> = fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && is_supported_audio(p))
         .collect();
-
-    result.sort_by_key(|a| a.album_name.to_lowercase());
-    result
+    tracks.sort_by_key(|p| name_of(p).to_lowercase());
+    let first = tracks.first()?;
+    let track = parse_track(first);
+    Some(AlbumSummary {
+        album_name: if track.album != "Unknown Album" {
+            track.album.clone()
+        } else {
+            name_of(dir)
+        },
+        artist_name: track.artist.clone(),
+        folder_path: dir.to_string_lossy().to_string(),
+        track_count: tracks.len(),
+        first_track_path: first.to_string_lossy().to_string(),
+        has_artwork: track.has_artwork,
+        is_folder: false,
+    })
 }
 
 /// The paths that no longer point at a file.
@@ -226,7 +237,7 @@ mod tests {
         tag(&album.join("1.wav"), "First Album", 1);
         tag(&album.join("2.wav"), "Other Album", 2);
 
-        let albums = list_albums(&dir.path().to_string_lossy());
+        let albums = list_albums(&dir.path().to_string_lossy()).unwrap();
 
         assert_eq!(albums.len(), 1);
         assert_eq!(albums[0].album_name, "First Album");
@@ -241,7 +252,7 @@ mod tests {
         fs::create_dir(&album).unwrap();
         fs::write(album.join("1.wav"), wav_bytes()).unwrap();
 
-        let albums = list_albums(&dir.path().to_string_lossy());
+        let albums = list_albums(&dir.path().to_string_lossy()).unwrap();
 
         assert_eq!(albums[0].album_name, "folder name");
     }
@@ -255,10 +266,49 @@ mod tests {
             fs::write(album.join("1.wav"), wav_bytes()).unwrap();
         }
 
-        let albums = list_albums(&dir.path().to_string_lossy());
+        let albums = list_albums(&dir.path().to_string_lossy()).unwrap();
 
         let names: Vec<_> = albums.iter().map(|a| a.album_name.as_str()).collect();
         assert_eq!(names, ["A", "b", "c"]);
+    }
+
+    #[test]
+    fn the_album_view_lists_what_is_directly_inside() {
+        let dir = tempfile::tempdir().unwrap();
+        for album in ["Jazz/Blue Night", "Single"] {
+            let path = dir.path().join(album);
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join("1.wav"), wav_bytes()).unwrap();
+        }
+        fs::create_dir(dir.path().join("empty")).unwrap();
+
+        let albums = list_albums(&dir.path().to_string_lossy()).unwrap();
+
+        let shown: Vec<_> = albums
+            .iter()
+            .map(|a| (a.album_name.as_str(), a.is_folder))
+            .collect();
+        assert_eq!(
+            shown,
+            [("empty", true), ("Jazz", true), ("Single", false)],
+            "folders without tracks are folders, deeper albums are not listed"
+        );
+    }
+
+    #[test]
+    fn a_folder_with_tracks_shows_itself_first() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("1.wav"), wav_bytes()).unwrap();
+        fs::write(dir.path().join("2.wav"), wav_bytes()).unwrap();
+        fs::create_dir(dir.path().join("Bonus")).unwrap();
+        fs::write(dir.path().join("Bonus").join("1.wav"), wav_bytes()).unwrap();
+
+        let albums = list_albums(&dir.path().to_string_lossy()).unwrap();
+
+        assert_eq!(albums.len(), 2);
+        assert_eq!(albums[0].folder_path, dir.path().to_string_lossy());
+        assert_eq!(albums[0].track_count, 2);
+        assert_eq!(albums[1].album_name, "Bonus");
     }
 
     #[test]
